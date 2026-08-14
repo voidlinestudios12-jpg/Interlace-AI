@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/interlace-logo.svg" width="86" alt="Interlace AI">
+<img src="figures/interlace-logo.svg" width="86" alt="Interlace AI">
 
 # Interlace AI — Nem
 
@@ -8,7 +8,7 @@
 
 Inference-time compute, learned verification and tree search as a substitute for parameter scale.
 
-[![Paper](https://img.shields.io/badge/paper-TR--2026--01-0a58ff)](docs/paper/Modern_Architecture_On_Advanced_LLM.html)
+[![Paper](https://img.shields.io/badge/paper-TR--2026--01-0a58ff)](paper/Modern_Architecture_On_Advanced_LLM.md)
 [![Code License](https://img.shields.io/badge/code-Apache%202.0-green)](LICENSE)
 [![Paper License](https://img.shields.io/badge/paper-CC%20BY--NC%204.0-lightgrey)](LICENSE-PAPER)
 
@@ -74,16 +74,18 @@ Three selectors are implemented:
 ## Repository layout
 
 ```
-nova/
-  inference/motor.py           Inference engine — Best-of-N and the three selectors
-  inference/verificadores.py   Answer extraction and normalisation
-  forge/sft_verificador.py     Verifier (ORM) training
-  forge/preparar_datos_verificador.py   Data preparation and decontamination
-  eval/run_benchmark.py        Evaluation harness (AIME / GPQA / GSM8K)
-  correr_nova.py               CLI entry point
-shared/modelo_base.py          Base model loading and sampling configuration
-docs/benchmarks/               Raw per-problem outputs and reports
-docs/paper/                    Technical report TR-2026-01
+src/
+  engine/motor.py          Inference engine — Best-of-N and the three selectors
+  engine/verificadores.py  Answer extraction and normalisation
+  verifier/train_verifier.py   Verifier (ORM) training
+  verifier/prepare_data.py     Data preparation and decontamination
+  eval/run_benchmark.py    Evaluation harness (AIME / GPQA / GSM8K)
+  model.py                 Base model loading and sampling configuration
+
+paper/     Technical report TR-2026-01
+results/   Raw per-problem outputs — baselines, best_of_n, verifier
+data/      Evaluation problem sets
+figures/   Logo and plotting scripts
 ```
 
 ---
@@ -93,15 +95,12 @@ docs/paper/                    Technical report TR-2026-01
 ```bash
 pip install torch transformers vllm
 
-# Baseline — single sample
-BENCHMARK=aime python nova/eval/run_benchmark.py
-
-# Best-of-N with the verifier
-python nova/correr_nova.py --benchmark aime --n 128 --selector verificador
+# Baseline — single sample per problem
+BENCHMARK=aime python src/eval/run_benchmark.py
 ```
 
 Every number in the tables above is regenerable from this repository. Raw per-problem outputs —
-including the model's full reasoning for each attempt — are committed under `docs/benchmarks/`
+including the model's full reasoning for each attempt — are committed under `results/`
 so results can be audited without re-running anything.
 
 ### Evaluation integrity
