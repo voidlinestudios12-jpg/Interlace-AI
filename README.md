@@ -153,6 +153,6 @@ writing beforehand.
 
 **Alejandro Areces Rivera** — Interlace AI
 
-interlaceIA@gmail.com · voidlinestudios12@gmail.com
+interlaceIA@gmail.com
 
 Open to collaboration, review and questions. Commercial authorisation requests to the same address.
