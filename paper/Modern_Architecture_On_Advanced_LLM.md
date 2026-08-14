@@ -26,8 +26,8 @@ paired with a structured inference-time compute layer, and show that the combina
 substantial fraction of the capability normally attributed to scale. On AIME 2024, the frozen base
 improves from 23.3% single-sample accuracy to 83.3% coverage at N=128; a trained outcome verifier
 converts that coverage into 52.2% realised accuracy at N=32, a 16.6-point gain over majority voting.
-We formalise the generation–selection decomposition, identify the **selection gap** as the governing
-bottleneck of such systems, report transfer to graduate-level science and arithmetic reasoning, and
+We make the generation–selection decomposition explicit, identify the **selection gap** as the
+governing bottleneck of such systems, report transfer to graduate-level science and arithmetic reasoning, and
 derive **Best-of-N MCTS** — a tree-search generalisation in which the outcome verifier supplies
 process-level guidance through truncated rollout, removing the need for step-level supervision. All
 results are reproducible from a public repository.
@@ -37,14 +37,16 @@ results are reproducible from a public repository.
 ## Contents
 
 1. [Introduction](#1-introduction)
-2. [The Generation–Selection Decomposition](#2-the-generationselection-decomposition)
-3. [System Architecture](#3-system-architecture)
-4. [The Learned Verifier](#4-the-learned-verifier)
-5. [Empirical Results](#5-empirical-results)
-6. [Best-of-N MCTS](#6-best-of-n-mcts)
-7. [Discussion](#7-discussion)
-8. [Limitations](#8-limitations)
-9. [Conclusion](#9-conclusion)
+2. [Related Work](#2-related-work)
+3. [The Generation–Selection Decomposition](#3-the-generationselection-decomposition)
+4. [System Architecture](#4-system-architecture)
+5. [The Learned Verifier](#5-the-learned-verifier)
+6. [Empirical Results](#6-empirical-results)
+7. [Best-of-N MCTS](#7-best-of-n-mcts)
+8. [Discussion](#8-discussion)
+9. [Limitations](#9-limitations)
+10. [Conclusion](#10-conclusion)
+11. [References](#references)
 
 ---
 
@@ -60,23 +62,65 @@ a small model without modifying its weights?*
 We argue the answer is considerably more than is generally assumed, provided the system is
 restructured. Rather than treating a language model as a function mapping a problem to an answer, we
 treat it as a *stochastic proposal distribution* over reasoning trajectories, and shift the burden of
-correctness onto a separate selection mechanism. This decomposition is the core contribution of the
-report, and everything that follows — the architecture of §3, the verifier of §4, and the tree search
-of §6 — is a consequence of it.
+correctness onto a separate selection mechanism. This decomposition organises the report, and
+everything that follows — the architecture of §4, the verifier of §5, and the tree search
+of §7 — is a consequence of it.
 
-Our contributions are:
+The components used here are established. Repeated sampling with majority voting [4], verifier-based
+reranking of N candidates [1], and the general finding that inference-time compute can substitute for
+parameter count [6, 7] are all prior work, and §2 situates this report against them. What follows is
+therefore an empirical contribution rather than a methodological one:
 
-1. A formal decomposition of inference-time compute into coverage and selection, with the selection
-   gap identified as the binding constraint.
-2. A complete architecture realising it on a frozen 1.5B base, with measured results on three
-   benchmarks.
-3. A trained outcome verifier that recovers roughly half the available selection gap.
-4. Best-of-N MCTS, a tree-search generalisation that uses outcome supervision for process-level
-   guidance.
+1. A complete, open implementation of the generation–selection architecture on a frozen 1.5B base,
+   with decontamination and per-problem raw outputs published for independent audit.
+2. Measurements on three benchmarks quantifying the **selection gap** — the distance between what the
+   model reaches and what the selector returns — at sample budgets from N=1 to N=128.
+3. A trained outcome verifier that recovers roughly half of that gap, and the finding that
+   confidence-weighted voting outperforms argmax reranking by 8.9 points.
+4. Best-of-N MCTS: a tree-search formulation in which an *outcome*-supervised verifier supplies
+   process-level guidance through truncated rollout, avoiding the step-level annotation that process
+   reward models require [5]. This is specified and predicted, not evaluated (§7.3).
 
 ---
 
-## 2. The Generation–Selection Decomposition
+## 2. Related Work
+
+**Chain-of-thought and repeated sampling.** Eliciting intermediate reasoning before the final answer
+[3] made the output of a language model a *trajectory* rather than a token, which is what makes
+sampling several of them meaningful. Self-consistency [4] established the basic form used here:
+sample N chains at non-zero temperature and return the modal answer. Brown et al. [7] studied how
+coverage — the probability that at least one of N samples is correct — scales with the budget, and
+observed the same divergence between coverage and what a deployed selector actually returns that
+motivates §3.1 of this report.
+
+**Verifiers.** Cobbe et al. [1] introduced the technique this work builds on most directly: train a
+separate model to judge candidate solutions, then rerank N samples by its score. Their verifiers were
+*outcome*-supervised — labelled only by final correctness — which is also the supervision used here.
+Uesato et al. [2] compared outcome- against process-supervision, and Lightman et al. [5] showed that
+process reward models, which score individual reasoning steps, select better than outcome models. The
+cost of that improvement is step-level annotation, which is the constraint §7.2 is designed around.
+
+**Test-time compute as a substitute for scale.** Snell et al. [6] framed the question addressed here
+directly: given a fixed budget, is it better spent on parameters or on inference-time search? Their
+finding — that for many problem difficulties the latter wins — is the premise this report assumes
+rather than re-establishes. The contribution here is a measurement of that trade-off on a model at
+the small end of the range (1.5B), where the asymmetry is most favourable and least often reported.
+
+**Tree search over reasoning.** Tree of Thoughts [8] generalised chain-of-thought to a search over
+partial reasoning states. Subsequent work combines Monte Carlo tree search with a learned value
+function, typically a process reward model, using the PUCT selection rule from AlphaGo Zero [9].
+§7 follows that line with one difference: because no step-level labels were available, node values
+come from an outcome verifier applied to a *completed* rollout from the prefix, which keeps the
+verifier inside its training distribution.
+
+**Where this report sits.** It does not introduce a new selection algorithm. It reports what the
+established combination achieves on a frozen 1.5B model when implemented carefully and measured
+honestly — separating coverage from realised accuracy, decontaminating the verifier's training data,
+and publishing every raw trajectory so the numbers can be replayed rather than trusted.
+
+---
+
+## 3. The Generation–Selection Decomposition
 
 Let *M* be a frozen autoregressive reasoning model and *x* a problem instance. Sampling *M* at
 temperature *T* > 0 induces a distribution over complete reasoning trajectories *y*. We draw *N*
@@ -86,7 +130,8 @@ output is determined by a selector *S* over the sampled set:
 > **(1)**  ŷ = S( { y₁, …, y_N } ),  where  yᵢ ~ M( · | x, T )
 
 This separates two quantities conflated in single-sample evaluation. The first is **coverage**: the
-probability that at least one sampled trajectory reaches the correct answer *a\**. Writing *p* for the
+probability that at least one sampled trajectory reaches the correct answer *a\**, the quantity
+studied by Brown et al. [7]. Writing *p* for the
 per-sample success probability,
 
 > **(2)**  Cov(N) = 1 − ( 1 − p )^N,  where  p = P_{y~M}[ a(y) = a\* ]
@@ -97,46 +142,46 @@ selector:
 
 > **(3)**  Acc(N) = Cov(N) · P[ S = a\* | a\* ∈ candidates ]  ≤  Cov(N)
 
-### 2.1 The selection gap
+### 3.1 The selection gap
 
 We define the *selection gap* **G(N) = Cov(N) − Acc(N)**: the accuracy a perfect selector would
 recover but the deployed selector does not. Equation (2) shows coverage saturating logarithmically in
 N, so beyond a moderate budget additional samples contribute little. The gap, by contrast, does not
 close on its own. It is therefore the correct optimisation target for any inference-time compute
-architecture, and §5 confirms that it dominates system performance in practice.
+architecture, and §6 confirms that it dominates system performance in practice.
 
 ---
 
-## 3. System Architecture
+## 4. System Architecture
 
 The system comprises four stages around an unmodified base. The base remains frozen throughout: no
 gradient reaches its weights. This guarantees the architecture cannot degrade the underlying model —
 a failure mode we observed repeatedly when attempting supervised adaptation of the same base, where
 an ill-chosen learning rate or a duplicated control token collapsed reasoning performance.
 
-### 3.1 Diverse proposal generation
+### 4.1 Diverse proposal generation
 
 N trajectories are sampled in parallel with nucleus sampling (T = 0.6, top-p = 0.95), served through
-a paged-attention engine so the N sequences share prefix key–value cache. Temperature is the control
+a paged-attention engine [12] so the N sequences share prefix key–value cache. Temperature is the control
 variable of the coverage–consensus trade-off: low temperature concentrates probability mass on the
 modal answer, raising consensus but lowering coverage; high temperature does the reverse.
 
-### 3.2 Answer normalisation
+### 4.2 Answer normalisation
 
 Trajectories terminate in a delimited answer field. Extraction must be robust to nested LaTeX
 environments, unit annotations and formatting variation, since a normalisation failure is
 indistinguishable from a reasoning failure at the metric level. We use bracket-balanced parsing of the
 terminal `\boxed{}` expression followed by numeric canonicalisation.
 
-### 3.3 Selection
+### 4.3 Selection
 
 Three selectors of increasing sophistication are supported:
 
 | Selector | Mechanism | Can recover a minority-correct answer? |
 |---|---|:---:|
-| Majority vote | Modal normalised answer | No |
+| Majority vote [4] | Modal normalised answer | No |
 | Self-certainty | Highest mean token log-probability | Rarely |
-| Learned verifier | Estimates P(correct \| x, y) per trajectory | **Yes** |
+| Learned verifier [1] | Estimates P(correct \| x, y) per trajectory | **Yes** |
 
 Majority voting is structurally incapable of recovering a correct answer held by a minority of
 trajectories. Self-certainty measures fluency rather than correctness. Only the learned verifier
@@ -144,27 +189,27 @@ attacks the selection gap directly.
 
 ---
 
-## 4. The Learned Verifier
+## 5. The Learned Verifier
 
-The verifier is an outcome reward model (ORM): a classification head over a frozen copy of the base,
-adapted with low-rank matrices. Training pairs (*x*, *y*) are labelled by agreement with reference
-answers, drawn exclusively from training-split problems.
+The verifier is an outcome reward model (ORM) in the sense of Cobbe et al. [1]: a classification head
+over a frozen copy of the base, adapted with low-rank matrices [11]. Training pairs (*x*, *y*) are labelled by agreement with reference
+answers, drawn exclusively from training-split problems [13].
 
-### 4.1 Decontamination
+### 5.1 Decontamination
 
 Every candidate training problem is checked against the full evaluation suite by three independent
 criteria: normalised exact match, substring containment, and Jaccard overlap of 5-gram shingles above
 0.6. A problem failing any criterion is discarded. Given how easily contamination inflates apparent
 performance, we regard this step as a precondition for reporting results at all, not an optimisation.
 
-### 4.2 Training
+### 5.2 Training
 
 Self-generated data is positively skewed, so the loss is class-weighted. The train/validation split is
 performed at the *problem* level rather than the trajectory level, preventing trajectories of the same
 problem from appearing on both sides. The resulting verifier reaches **0.910 ROC-AUC** and **84.1%
 accuracy** on held-out problems.
 
-### 4.3 Confidence-weighted aggregation
+### 5.3 Confidence-weighted aggregation
 
 Rather than returning the single highest-scored trajectory, we aggregate votes weighted by verifier
 confidence:
@@ -185,7 +230,7 @@ substantial — 52.2% versus 43.3% at N = 32 (Table 2).
 
 ---
 
-## 5. Empirical Results
+## 6. Empirical Results
 
 All measurements use a 1.5B-parameter frozen reasoning base. Scaling results are reported on AIME 2024
 (30 problems); verifier evaluation uses the combined AIME 2023–2025 sets (90 problems) for statistical
@@ -231,7 +276,7 @@ Gains are largest where headroom is largest.
 
 ---
 
-## 6. Best-of-N MCTS
+## 7. Best-of-N MCTS
 
 Flat Best-of-N treats trajectories as atomic: N complete solutions are generated independently and
 scored only at termination. Two inefficiencies follow directly from the measurements above.
@@ -246,15 +291,15 @@ diverge, flat sampling treats them as k unrelated observations. The shared prefi
 likely to be correct — accumulates no credit. This is precisely why majority voting saturates at 53.3%
 while coverage continues climbing.
 
-### 6.1 Formulation
+### 7.1 Formulation
 
 We restructure sampling as search over a tree *T* whose nodes are *partial* trajectories. The root is
 the problem statement; an edge is the generation of one reasoning segment, bounded at a natural
 boundary such as a line break or completed derivation step; a leaf contains a terminal answer. Each
 node *s* maintains a visit count *n(s)*, accumulated value *W(s)* and mean *Q(s) = W(s)/n(s)*.
 
-Descent from the root follows a PUCT rule balancing exploitation of high-value prefixes against
-exploration of under-visited ones, with the model's own sequence likelihood as prior:
+Descent from the root follows the PUCT rule of Silver et al. [9], balancing exploitation of
+high-value prefixes against exploration of under-visited ones, with the model's own sequence likelihood as prior:
 
 > **(5)**  a\* = argmax_a [ Q(s,a) + c_puct · P(a|s) · √( Σ_b n(s,b) ) / ( 1 + n(s,a) ) ]
 
@@ -262,7 +307,7 @@ The prior anchors search to trajectories the base considers fluent; *Q* allows t
 override fluency when it disagrees — the same mechanism responsible for the 16.6-point gain in the
 flat setting.
 
-### 6.2 Outcome supervision for process-level guidance
+### 7.2 Outcome supervision for process-level guidance
 
 The verifier was trained on complete trajectories, so applying it to prefixes would violate its
 training distribution. We instead evaluate a node by *truncated rollout*: from prefix *s*, one
@@ -274,7 +319,7 @@ is backed up along the path to the root:
 This preserves the verifier's training distribution — it only ever scores complete trajectories —
 while propagating credit to the prefixes responsible for them. It is the key design choice of the
 method: it enables an *outcome*-supervised verifier to provide process-level guidance without
-step-level labels, whose annotation cost is the principal barrier to process reward modelling.
+step-level labels, whose annotation cost is the principal barrier to process reward modelling [5].
 
 ```python
 # Best-of-N MCTS — one search iteration
@@ -301,7 +346,7 @@ At exhaustion of the budget, answers are aggregated by visit-weighted verifier v
 Equation (7) generalises both baselines: setting *V* ≡ 1 recovers visit-weighted majority voting, and
 restricting the tree to depth one recovers equation (4), the strongest selector measured.
 
-### 6.3 Cost model and prediction
+### 7.3 Cost model and prediction
 
 For comparison at parity, both methods must be held to an identical token budget. Flat Best-of-N with
 budget N consumes N · L tokens for mean trajectory length L. The tree method with *I* iterations
@@ -310,7 +355,7 @@ begin from a prefix rather than the problem statement, L_roll < L, and the numbe
 trajectories explored per token exceeds that of flat sampling.
 
 > ⚠️ **Status of results.** Tables 1–3 report measured outcomes of flat Best-of-N and verifier
-> selection. The tree method of §6 is derived from those measurements; its evaluation requires
+> selection. The tree method of §7 is derived from those measurements; its evaluation requires
 > sustained accelerator access beyond currently available resources, and **no results for it are
 > claimed here.**
 
@@ -321,9 +366,9 @@ negative result on the intermediate regime falsifies the method.
 
 ---
 
-## 7. Discussion
+## 8. Discussion
 
-### 7.1 Where the capability comes from
+### 8.1 Where the capability comes from
 
 A frozen 1.5B model attaining 83.3% coverage on competition mathematics implies the knowledge required
 is already present in the weights; what is unreliable is the *retrieval* of a correct trajectory on any
@@ -331,7 +376,7 @@ single attempt. Parameter scaling improves per-sample reliability directly. Infe
 attacks the same quantity from the opposite direction, amortising unreliability across samples. Within
 the range measured here, the two are substitutable.
 
-### 7.2 Economic asymmetry
+### 8.2 Economic asymmetry
 
 The substitution is favourable for small models. Drawing N = 128 trajectories from a 1.5B base remains
 cheaper in FLOPs than a single forward pass through a trillion-parameter system, and the memory
@@ -340,7 +385,7 @@ accuracy at fixed memory — precisely the trade an independent researcher can a
 
 ---
 
-## 8. Limitations
+## 9. Limitations
 
 - **Coverage bound.** Where *p* ≈ 0 for a problem class, equation (2) returns zero for every N. No
   selector and no search recovers a correct answer that was never generated. Extending beyond this
@@ -357,7 +402,7 @@ accuracy at fixed memory — precisely the trade an independent researcher can a
 
 ---
 
-## 9. Conclusion
+## 10. Conclusion
 
 Capability in language models is not a monolithic property of parameter count. Decomposed into proposal
 quality and selection quality, a substantial portion becomes addressable at inference time, on frozen
@@ -367,6 +412,58 @@ majority voting in our measurements. Best-of-N MCTS extends the same principle f
 to structured search, using outcome supervision to guide a process it was never explicitly trained on.
 The remaining constraint — improving the proposal distribution itself — is where compute becomes
 irreducible, and marks the boundary of what this architecture achieves alone.
+
+---
+
+## References
+
+[1] K. Cobbe, V. Kosaraju, M. Bavarian, M. Chen, H. Jun, L. Kaiser, M. Plappert, J. Tworek,
+J. Hilton, R. Nakano, C. Hesse, J. Schulman. *Training Verifiers to Solve Math Word Problems.*
+arXiv:2110.14168, 2021.
+
+[2] J. Uesato, N. Kushman, R. Kumar, F. Song, N. Siegel, L. Wang, A. Creswell, G. Irving,
+I. Higgins. *Solving Math Word Problems with Process- and Outcome-Based Feedback.*
+arXiv:2211.14275, 2022.
+
+[3] J. Wei, X. Wang, D. Schuurmans, M. Bosma, B. Ichter, F. Xia, E. Chi, Q. Le, D. Zhou.
+*Chain-of-Thought Prompting Elicits Reasoning in Large Language Models.* NeurIPS, 2022.
+arXiv:2201.11903.
+
+[4] X. Wang, J. Wei, D. Schuurmans, Q. Le, E. Chi, S. Narang, A. Chowdhery, D. Zhou.
+*Self-Consistency Improves Chain of Thought Reasoning in Language Models.* ICLR, 2023.
+arXiv:2203.11171.
+
+[5] H. Lightman, V. Kosaraju, Y. Burda, H. Edwards, B. Baker, T. Lee, J. Leike, J. Schulman,
+I. Sutskever, K. Cobbe. *Let's Verify Step by Step.* ICLR, 2024. arXiv:2305.20050.
+
+[6] C. Snell, J. Lee, K. Xu, A. Kumar. *Scaling LLM Test-Time Compute Optimally Can Be More
+Effective Than Scaling Model Parameters.* arXiv:2408.03314, 2024.
+
+[7] B. Brown, J. Juravsky, R. Ehrlich, R. Clark, Q. V. Le, C. Ré, A. Mirhoseini. *Large Language
+Monkeys: Scaling Inference Compute with Repeated Sampling.* arXiv:2407.21787, 2024.
+
+[8] S. Yao, D. Yu, J. Zhao, I. Shafran, T. L. Griffiths, Y. Cao, K. Narasimhan. *Tree of Thoughts:
+Deliberate Problem Solving with Large Language Models.* NeurIPS, 2023. arXiv:2305.10601.
+
+[9] D. Silver, J. Schrittwieser, K. Simonyan, et al. *Mastering the Game of Go without Human
+Knowledge.* Nature 550, 354–359, 2017.
+
+[10] DeepSeek-AI. *DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement
+Learning.* arXiv:2501.12948, 2025. — source of the frozen base model used throughout.
+
+[11] E. J. Hu, Y. Shen, P. Wallis, Z. Allen-Zhu, Y. Li, S. Wang, L. Wang, W. Chen. *LoRA: Low-Rank
+Adaptation of Large Language Models.* ICLR, 2022. arXiv:2106.09685. — used to adapt the verifier.
+
+[12] W. Kwon, Z. Li, S. Zhuang, Y. Sheng, L. Zheng, C. H. Yu, J. E. Gonzalez, H. Zhang, I. Stoica.
+*Efficient Memory Management for Large Language Model Serving with PagedAttention.* SOSP, 2023.
+arXiv:2309.06180. — the serving engine used for batched sampling.
+
+[13] D. Hendrycks, C. Burns, S. Kadavath, A. Arora, S. Basart, E. Tang, D. Song, J. Steinhardt.
+*Measuring Mathematical Problem Solving with the MATH Dataset.* NeurIPS Datasets and Benchmarks,
+2021. arXiv:2103.03874. — source of verifier training problems.
+
+[14] D. Rein, B. L. Hou, A. C. Stickland, J. Petty, R. Y. Pang, J. Dirani, J. Michael, S. R. Bowman.
+*GPQA: A Graduate-Level Google-Proof Q&A Benchmark.* arXiv:2311.12022, 2023.
 
 ---
 
