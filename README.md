@@ -90,7 +90,8 @@ engine.solve(problem).answer
 
 ```
 src/
-  engine/motor.py          Inference engine — Best-of-N and the three selectors
+  engine/motor.py          Original inference engine (research code)
+  engine/bestofn_*.py      Packaged engine — see huggingface.co/InterlaceAI/best-of-n
   engine/verificadores.py  Answer extraction and normalisation
   verifier/train_verifier.py   Verifier (ORM) training
   verifier/prepare_data.py     Data preparation and decontamination
