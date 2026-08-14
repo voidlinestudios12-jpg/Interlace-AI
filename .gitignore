@@ -37,3 +37,6 @@ docs/benchmarks/fase3_prm/ESTADO_Y_RETOMAR.md
 nova/data/gpqa_eval_198.json
 # Resultados crudos de evaluación local (van a HF, no a git)
 results/rl_local/
+
+# Copias de seguridad locales
+*.bundle

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none">
+  <defs>
+    <linearGradient id="ig" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a58ff"/>
+      <stop offset="1" stop-color="#12b6e8"/>
+    </linearGradient>
+    <mask id="weave">
+      <rect width="64" height="64" fill="#fff"/>
+      <rect x="21.5" y="21.5" width="21" height="21" rx="6" fill="#000"/>
+    </mask>
+  </defs>
+  <rect x="7" y="7" width="30" height="30" rx="8.5" stroke="url(#ig)" stroke-width="4"/>
+  <g mask="url(#weave)">
+    <rect x="27" y="27" width="30" height="30" rx="8.5" stroke="url(#ig)" stroke-width="4"/>
+  </g>
+  <rect x="27" y="27" width="30" height="30" rx="8.5" stroke="url(#ig)" stroke-width="4"
+        stroke-dasharray="34 86" stroke-dashoffset="-52"/>
+</svg>
