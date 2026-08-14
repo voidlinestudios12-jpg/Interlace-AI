@@ -12,6 +12,8 @@
 
 *12 years · Interlace AI · 2026*
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21936833.svg)](https://doi.org/10.5281/zenodo.21936833)
+
 </div>
 
 ---
@@ -385,7 +387,8 @@ Every figure and table in this report is regenerable from that repository.
   year   = {2026},
   number = {TR-2026-01},
   institution = {Interlace AI},
-  url    = {https://github.com/voidlinestudios12-jpg/Interlace-AI-Nem}
+  doi    = {10.5281/zenodo.21936833},
+  url    = {https://doi.org/10.5281/zenodo.21936833}
 }
 ```
 

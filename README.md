@@ -8,8 +8,10 @@
 
 Inference-time compute, learned verification and tree search as a substitute for parameter scale.
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21936833.svg)](https://doi.org/10.5281/zenodo.21936833)
 [![Paper](https://img.shields.io/badge/paper-TR--2026--01-0a58ff)](paper/Modern_Architecture_On_Advanced_LLM.md)
 [![Code License](https://img.shields.io/badge/code-Apache%202.0-green)](LICENSE)
+[![HF](https://img.shields.io/badge/%F0%9F%A4%97%20package-best--of--n-yellow)](https://huggingface.co/InterlaceAI/best-of-n)
 [![Paper License](https://img.shields.io/badge/paper-CC%20BY--NC%204.0-lightgrey)](LICENSE-PAPER)
 
 </div>
@@ -71,6 +73,19 @@ Three selectors are implemented:
 
 ---
 
+## Use it in your own project
+
+The Best-of-N engine is packaged and released standalone under Apache 2.0 —
+any model, any N:
+
+```python
+from bestofn import BestOfN
+engine = BestOfN("your/model", n=32)
+engine.solve(problem).answer
+```
+
+**→ [huggingface.co/InterlaceAI/best-of-n](https://huggingface.co/InterlaceAI/best-of-n)**
+
 ## Repository layout
 
 ```
@@ -128,7 +143,8 @@ process-level guidance through truncated rollout, removing the need for step-lev
   author = {Areces Rivera, Alejandro},
   year   = {2026},
   number = {TR-2026-01},
-  institution = {Interlace AI}
+  institution = {Interlace AI},
+  doi    = {10.5281/zenodo.21936833}
 }
 ```
 
