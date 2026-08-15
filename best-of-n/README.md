@@ -45,6 +45,12 @@ So the problem splits in two:
 This library implements both halves: sampling N trajectories, and four different
 ways of choosing between them.
 
+![A 1.5B model against the field](figures/04_vs_other_models.png)
+
+Against published results from other laboratories. Ours is majority vote at
+N=128 — the figure a system can actually return; the others are their published
+pass@1. Coverage is shown separately and labelled as a ceiling.
+
 ![AIME results](figures/01_aime_base_vs_bestofn.png)
 
 Measured on `DeepSeek-R1-Distill-Qwen-1.5B`, **AIME 2024**, weights untouched:
