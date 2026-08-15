@@ -471,7 +471,7 @@ arXiv:2309.06180. — the serving engine used for batched sampling.
 
 Inference engine, evaluation harness, verifier training code, decontamination scripts and raw
 per-problem outputs are published at
-[github.com/voidlinestudios12-jpg/Interlace-AI-Nem](https://github.com/voidlinestudios12-jpg/Interlace-AI-Nem).
+[github.com/.../Interlace-AI-Nem/best-of-n](https://github.com/voidlinestudios12-jpg/Interlace-AI-Nem/tree/main/best-of-n).
 Every figure and table in this report is regenerable from that repository.
 
 ## Citation
