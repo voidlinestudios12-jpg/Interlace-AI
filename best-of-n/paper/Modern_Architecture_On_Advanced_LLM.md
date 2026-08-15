@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="../figures/interlace-logo.svg" width="64" alt="Interlace AI">
+<img src="../../assets/interlace-logo.svg" width="64" alt="Interlace AI">
 
 **INTERLACE AI** · Technical Report TR-2026-01
 
