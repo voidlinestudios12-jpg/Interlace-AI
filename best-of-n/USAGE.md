@@ -9,11 +9,19 @@ those two decisions determine most of your accuracy.
 ## Install
 
 ```bash
-pip install torch transformers
-pip install vllm          # strongly recommended; required for large N
+pip install bestofn
 ```
 
-Then download this repository:
+The package itself has no dependencies — the selectors run anywhere. To
+generate samples you also need a backend:
+
+```bash
+pip install torch transformers   # works everywhere
+pip install vllm                 # strongly recommended; required for large N
+```
+
+To run the test suite or replay the published measurements, get the repository
+as well — those files are not shipped in the wheel:
 
 ```python
 from huggingface_hub import snapshot_download

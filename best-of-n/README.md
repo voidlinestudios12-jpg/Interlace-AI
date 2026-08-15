@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="../assets/interlace-logo.png" width="96" alt="Interlace AI">
+<img src="https://huggingface.co/InterlaceAI/best-of-n/resolve/main/figures/interlace-logo.png" width="96" alt="Interlace AI">
 
 **INTERLACE&nbsp;AI**
 
@@ -13,9 +13,14 @@ No weights are modified. All gains come from *how* the model is used.
 
 Works with **any causal LM** and **any N** — you configure both.
 
+[![PyPI](https://img.shields.io/pypi/v/bestofn?color=blue)](https://pypi.org/project/bestofn/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21936833.svg)](https://doi.org/10.5281/zenodo.21936833)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-45%20passing-brightgreen)](tests/test_selectors.py)
+
+```bash
+pip install bestofn
+```
 
 </div>
 
@@ -112,8 +117,14 @@ BestOfN("/path/to/your/local/model", n=128)
 Install:
 
 ```bash
-pip install torch transformers
-pip install vllm     # recommended; required for large N
+pip install bestofn
+```
+
+Plus a backend to run the model with:
+
+```bash
+pip install torch transformers   # works everywhere
+pip install vllm                 # recommended; required for large N
 ```
 
 ---

@@ -50,6 +50,10 @@ On AIME 2024, a frozen 1.5B model goes from **23.3%** (single sample) to
 the ceiling any selector could reach, is **83.3%**. It transfers to
 graduate-level science and arithmetic reasoning without retraining.
 
+```bash
+pip install bestofn
+```
+
 ```python
 from bestofn import BestOfN
 
@@ -59,8 +63,9 @@ engine.solve(problem).answer
 
 **→ [`best-of-n/`](best-of-n/) — code, technical report, raw outputs and full documentation**
 
-Also on the Hub: **[huggingface.co/InterlaceAI/best-of-n](https://huggingface.co/InterlaceAI/best-of-n)**
+Also on: **[PyPI](https://pypi.org/project/bestofn/)** · **[Hugging Face](https://huggingface.co/InterlaceAI/best-of-n)**
 
+[![PyPI](https://img.shields.io/pypi/v/bestofn?color=blue)](https://pypi.org/project/bestofn/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21936833.svg)](https://doi.org/10.5281/zenodo.21936833)
 [![Code](https://img.shields.io/badge/code-Apache%202.0-green)](LICENSE)
 [![Paper](https://img.shields.io/badge/paper-CC%20BY--NC%204.0-lightgrey)](LICENSE-PAPER)
