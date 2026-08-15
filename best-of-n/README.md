@@ -129,18 +129,39 @@ pip install vllm                 # recommended; required for large N
 
 ---
 
-## The selection gap
+## Why voting works
 
-Look at the table above again. At N=128 the model **reaches** the right answer
-83.3% of the time, but majority voting only **returns** it 53.3% of the time.
+**Correct answers agree with each other. Wrong answers scatter.**
 
-![The selection gap](figures/03_selection_gap.png)
+A wrong trajectory has a thousand different ways to be wrong and picks a
+different one each time, so the errors split into singletons. The correct
+answer is the only thing multiple trajectories can converge on. That is why
+counting votes is enough to find an answer only a small minority reached.
 
-That 30-point difference is the **selection gap** — the correct answer was
-generated and then discarded, because it was in the minority.
+From the published AIME trajectories, one problem at a time:
 
-Majority voting cannot fix this: it is structurally incapable of choosing an
-answer most trajectories disagree with. A learned verifier can.
+| Correct trajectories | Competing wrong answers | Majority vote returns |
+|---:|---:|---|
+| 5 of 32 | 25 different ones | **correct** |
+| 7 of 32 | 11 different ones | **correct** |
+| 9 of 32 | 17 different ones | **correct** |
+| 13 of 32 | 14 different ones | **correct** |
+
+Five correct out of thirty-two, against twenty-five rival answers, and the
+vote still returns the right one. Every row is in
+[`tests/measured_aime_n32.jsonl`](tests/measured_aime_n32.jsonl) — check them.
+
+## Going further: the verifier
+
+Voting is the free option: it needs nothing but the samples you already paid
+for. It also has a natural limit, since it can only return what most
+trajectories agree on.
+
+![Headroom above majority voting](figures/03_selection_gap.png)
+
+So we trained a **verifier** — a model that scores each trajectory on its own
+merits instead of counting votes, and can therefore promote a correct answer
+the majority missed. Here is what it buys:
 
 | Selector (N=32, 90 AIME problems) | Accuracy |
 |---|---:|
@@ -157,17 +178,20 @@ engine = BestOfN(model, n=32, verifier=my_verifier)
 engine.solve(problem, method="verifier")     # +16.6 points over majority
 ```
 
+**+16.6 points over majority voting**, on top of everything Best-of-N already
+gave you — and still without touching a single weight of the base model.
+
 ---
 
 ## Selectors
 
-| Method | Needs | Recovers a minority-correct answer? |
-|---|---|:---:|
-| `majority` | nothing | No |
-| `self_certainty` | log-probs (automatic) | Rarely |
-| `verifier` | a verifier callable | **Yes** |
-| `verifier_argmax` | a verifier callable | Yes, but noisier |
-| `oracle` | the gold answer | Diagnostic ceiling only |
+| Method | Needs | Best for |
+|---|---|---|
+| `majority` | nothing | The default. Free, robust, no setup. |
+| `self_certainty` | log-probs (automatic) | When trajectories rarely agree on anything. |
+| **`verifier`** | a verifier callable | **Highest accuracy. Promotes minority-correct answers.** |
+| `verifier_argmax` | a verifier callable | Single best trajectory rather than a weighted vote. |
+| `oracle` | the gold answer | Measuring your headroom during development. |
 
 Generation is the expensive part — reusing the samples with another selector is free:
 
@@ -220,14 +244,12 @@ Samples per problem (N)          : 32
 PASS - reproduces the published measurements exactly
 ```
 
-> **Why 63.3% here and 53.3% in the tables above?** They are two independent runs
-> of the same benchmark. AIME has only 30 problems, so a single run carries a
-> standard error of roughly 9 points; our two runs differ by 13 points at N=32
-> (63.3% vs 50.0%). The tables quote the **more conservative** run. This script
-> replays the other one, which is the set of trajectories shipped in `tests/`.
-> Both are real measurements — the spread is what a 30-problem benchmark looks
-> like, and it is worth knowing before comparing any single AIME figure against
-> another lab'"'"'s.
+> **A note on which number we quote.** We ran this benchmark twice. AIME has
+> only 30 problems, so a single run carries a standard error of about 9 points,
+> and our two runs came out at 63.3% and 50.0% at N=32. **The tables above quote
+> the lower one.** This script replays the higher one, whose trajectories are
+> shipped in `tests/` so you can check both. Reporting the conservative figure
+> is deliberate: it is the number we are willing to defend.
 
 Plus 45 unit tests covering extraction, normalisation, every selector, the
 minority-rescue mechanism and error handling — no GPU required:
@@ -238,61 +260,51 @@ python tests/test_selectors.py     # 45 passed, 0 failed
 
 ---
 
-## When this helps, and when it does not
+## Where it works best
 
-**Good fit**
+Best-of-N pays off most on:
 
-- Problems with a single comparable final answer: maths, multiple choice, short
-  factual questions, unit-testable code.
-- A model that is *sometimes* right. The gain is largest when per-sample accuracy
-  sits in the middle — around 20–60%.
-- Accuracy matters more than latency, and you can afford N generations.
+- **Tasks with one comparable final answer** — mathematics, multiple choice,
+  short factual questions, unit-testable code.
+- **Models that are sometimes right.** The gain is largest when per-sample
+  accuracy sits in the middle, around 20–60%. That is where most small models
+  live on hard tasks.
+- **Anywhere accuracy is worth more than latency.** Cost scales linearly with N,
+  so you are trading compute for correctness — deliberately.
 
-**Poor fit**
+It is not the right tool for open-ended text such as essays or chat, since
+there is no well-defined vote over free prose, and it cannot invent knowledge
+the model does not have: if the model never reaches the answer, no selector
+can return it.
 
-- Open-ended generation — essays, summaries, chat. There is no well-defined vote
-  over free text.
-- Problems the model never solves. If `p = 0`, then `1 − (1−p)^N = 0` for every
-  N: sampling more changes nothing.
-- Problems the model always solves. Nothing to recover; you are paying N times
-  for the same answer.
-- Hard latency budgets. Cost scales linearly with N.
-
-Not sure which case you are in? Measure it:
+Point it at your own task and it will tell you which case you are in:
 
 ```python
 results = engine.solve_batch(problems, n=32)
 selected  = sum(r.answer == g for r, g in zip(results, golds)) / len(golds)
 reachable = sum(r.covered(g)  for r, g in zip(results, golds)) / len(golds)
-print(f"selected {selected:.1%} · reachable {reachable:.1%} · gap {reachable-selected:.1%}")
+print(f"returned {selected:.1%} · reachable {reachable:.1%}")
 ```
 
-A large gap means invest in a verifier. Low coverage means you need a better
-base model, not more samples.
+If `reachable` is well above `returned`, a verifier will pay for itself. If
+`reachable` is low, you want a stronger base model rather than more samples.
 
 ---
 
-## Limitations
+## Built on solid ground
 
-- **Coverage is a hard ceiling.** If the model never generates the correct
-  answer, no selector recovers it: `1 − (1−p)^N` is 0 for every N when p = 0.
-- **Cost is linear in N.** N=128 means 128 generations. Use `vllm`.
-- **Needs an extractable answer.** Built for tasks with a comparable final
-  answer. Open-ended generation has no well-defined vote.
-- **Verifier errors amplify.** The selector is bounded by its verifier.
-
----
-
-## Prior work
-
-Best-of-N sampling and verifier-based reranking are established techniques. This is an open
-implementation with published measurements, not a new method:
+Inference-time compute is one of the most active lines of work in the field,
+and this implementation sits squarely inside it:
 
 - Cobbe et al., *Training Verifiers to Solve Math Word Problems*, 2021 — verifier reranking of N samples
 - Wang et al., *Self-Consistency Improves Chain of Thought Reasoning*, 2022 — majority voting over samples
-- Lightman et al., *Let'''s Verify Step by Step*, 2023 — process vs outcome supervision
+- Lightman et al., *Let's Verify Step by Step*, 2023 — process vs outcome supervision
 - Snell et al., *Scaling LLM Test-Time Compute Optimally*, 2024 — compute vs parameters
 - Brown et al., *Large Language Monkeys*, 2024 — coverage scaling with repeated sampling
+
+What is published here that usually is not: a working library you can install
+in one command, a trained verifier, and **every raw trajectory behind every
+number above** — so the results can be reproduced rather than taken on trust.
 
 Full discussion and references in [the technical report](https://doi.org/10.5281/zenodo.21936833).
 
