@@ -216,7 +216,7 @@ Full discussion and references in [the technical report](https://doi.org/10.5281
 ```
 
 Technical report: [doi.org/10.5281/zenodo.21936833](https://doi.org/10.5281/zenodo.21936833)
-Code and raw outputs: [github.com/voidlinestudios12-jpg/Interlace-AI-Nem](https://github.com/voidlinestudios12-jpg/Interlace-AI-Nem)
+Code and raw outputs: [github.com/voidlinestudios12-jpg/Interlace-AI/tree/main/best-of-n](https://github.com/voidlinestudios12-jpg/Interlace-AI/tree/main/best-of-n)
 
 ---
 
