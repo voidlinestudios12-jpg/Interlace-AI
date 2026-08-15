@@ -46,7 +46,8 @@ model and select the best one. No weights are modified; all gains come from how
 the model is used.
 
 On AIME 2024, a frozen 1.5B model goes from **23.3%** (single sample) to
-**53.3%** deployed accuracy, with **83.3%** coverage at N=128. It transfers to
+**53.3%** with majority voting at N=128 — the deployable figure. Its coverage,
+the ceiling any selector could reach, is **83.3%**. It transfers to
 graduate-level science and arithmetic reasoning without retraining.
 
 ```python

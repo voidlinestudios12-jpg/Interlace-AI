@@ -264,15 +264,34 @@ selection, not by generation.
 The learned verifier improves on majority voting by **16.6 points**, converting roughly half the
 available selection gap into realised accuracy.
 
-**Table 3 — Transfer across domains. Same frozen base, no weight modification.**
+**Table 3 — Transfer across domains. Majority vote throughout; same frozen base, no
+weight modification.**
 
-| Benchmark | Single sample | With inference-time compute | Δ |
+| Benchmark | N | Single sample | Majority vote | Δ |
+|---|---:|---:|---:|---:|
+| AIME 2024 — mathematics | 128 | 23.3% | 53.3% | **+30.0** |
+| GPQA-Diamond — graduate science | 32 | 33.8% | 43.4% | **+9.6** |
+| GSM8K — arithmetic reasoning | 4 | 87.2% | 92.8% | **+5.6** |
+
+All three columns report the *deployable* selector. AIME coverage at N=128 is higher
+(83.3%, Table 1) but is a ceiling, not a result a system can return. Gains are largest
+where headroom is largest.
+
+### 6.1 Measurement variance
+
+AIME comprises 30 problems per year, so a single run carries a standard error of roughly
+9 points. We ran the N-sweep twice, independently:
+
+| Run | N=8 | N=16 | N=32 |
 |---|---:|---:|---:|
-| AIME 2024 — mathematics | 23.3% | 83.3% | **+60.0** |
-| GPQA-Diamond — graduate science | 33.8% | 43.4% | **+9.6** |
-| GSM8K — arithmetic reasoning | 87.2% | 92.8% | **+5.6** |
+| Extended sweep (Table 1, max_tokens 32768) | 40.0% | 46.7% | 50.0% |
+| Earlier run (max_tokens 4096) | 43.3% | 53.3% | 63.3% |
 
-Gains are largest where headroom is largest.
+The 13-point spread at N=32 is within the noise of a 30-problem set, but it is large
+enough to matter. **We quote the more conservative run throughout this report.** Readers
+comparing against other work should treat any single-year AIME figure — ours or anyone
+else'''s — as carrying that uncertainty. The 90-problem combined set (Table 2) is used
+wherever a comparison is load-bearing.
 
 ---
 
