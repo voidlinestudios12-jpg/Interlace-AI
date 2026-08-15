@@ -80,6 +80,29 @@ And across domains:
 All three are majority vote — the selector you would actually deploy. AIME
 coverage at N=128 is higher (83.3%) but is a ceiling, not a returnable result.
 
+### It transfers to models it was never built for
+
+Everything above was measured on one reasoning-distilled model. So we ran it
+again from scratch on a completely different one — `Qwen2.5-0.5B-Instruct`, a
+general instruct model, a third of the size, on GSM8K:
+
+![A different model entirely](figures/05_otro_modelo_gsm8k.png)
+
+| N | Majority vote | ± sd | Coverage |
+|---:|---:|---:|---:|
+| 1 | 38.2% | 2.31 | 38.2% |
+| 4 | 45.5% | 2.04 | 60.0% |
+| 8 | 50.9% | 1.62 | 70.1% |
+| **16** | **53.3%** | **1.01** | 79.5% |
+
+**+15.1 points**, on one consumer GPU, weights untouched. Note the standard
+deviation falling from 2.31 to 1.01 as N grows: Best-of-N does not only raise
+accuracy, it makes the system **more predictable**.
+
+Every trajectory behind that table is published in
+[`results/generalisation/`](https://github.com/voidlinestudios12-jpg/Interlace-AI/tree/main/best-of-n/results/generalisation),
+with the script that produced it.
+
 ### How a call works
 
 1. **Generate.** N reasoning trajectories are sampled in parallel from the frozen
