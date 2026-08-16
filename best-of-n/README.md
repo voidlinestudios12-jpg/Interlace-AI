@@ -22,6 +22,8 @@ Works with **any causal LM** and **any N** — you configure both.
 pip install bestofn
 ```
 
+<img src="https://huggingface.co/InterlaceAI/best-of-n/resolve/main/figures/terminal_bestofn.gif" width="760" alt="Best-of-N in the terminal: 16 samples, Canberra x12 vs Sydney x4">
+
 </div>
 
 ---
