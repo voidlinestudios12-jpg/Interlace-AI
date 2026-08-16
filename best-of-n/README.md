@@ -203,6 +203,8 @@ engine = BestOfN(model, n=32, verifier=my_verifier)
 engine.solve(problem, method="verifier")     # +16.6 points over majority
 ```
 
+<img src="https://huggingface.co/InterlaceAI/best-of-n/resolve/main/figures/verificador_bestofn.gif" width="760" alt="Plugging a verifier into Best-of-N: three lines, +16.6 points">
+
 **+16.6 points over majority voting**, on top of everything Best-of-N already
 gave you — and still without touching a single weight of the base model.
 
