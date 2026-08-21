@@ -31,11 +31,11 @@ import os
 import random
 import statistics
 import sys
-from collections import Counter
+
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from bestofn import Sample, normalise, select                # noqa: E402
+from bestofn import Sample, coverage, normalise, select      # noqa: E402
 from bestofn.extract import extract_boxed                    # noqa: E402
 
 CURVE = (1, 2, 4, 8, 16)
@@ -170,19 +170,20 @@ def main():
         if n > n_max:
             continue
         rnd_hits, maj_hits, cov_hits, sigmas = [], [], [], []
-        for _ in range(RESAMPLES):
+        for rep in range(RESAMPLES):
             r_ok = m_ok = c_ok = 0
             for s, g in zip(samples, golds):
                 draw = rng.sample(s, n)
-                gn = normalise(g)
-                votes = [x.key for x in draw if x.key]
-                if votes:
-                    if rng.choice(votes) == gn:
-                        r_ok += 1
-                    if Counter(votes).most_common(1)[0][0] == gn:
-                        m_ok += 1
-                    if gn in votes:
-                        c_ok += 1
+                # Go through the library's own selectors rather than
+                # reimplementing the vote here. A published curve that bypasses
+                # select() does not exercise tie-breaking or answer merging,
+                # and can drift from what users actually get.
+                if select(draw, "majority") == normalise(g):
+                    m_ok += 1
+                if select(draw, "random", seed=rep) == normalise(g):
+                    r_ok += 1
+                if coverage(draw, g):
+                    c_ok += 1
             rnd_hits.append(r_ok / n_prob)
             maj_hits.append(m_ok / n_prob)
             cov_hits.append(c_ok / n_prob)
@@ -191,11 +192,17 @@ def main():
         rnd, maj, cov = (100 * statistics.fmean(x)
                          for x in (rnd_hits, maj_hits, cov_hits))
         sd = 100 * statistics.pstdev(sigmas)
-        lo, hi = bootstrap_ci([1.0 if h else 0.0 for h in
-                               [statistics.fmean(maj_hits)] * n_prob])
+        # Confidence interval over problems, from one representative draw --
+        # the resample spread (sd) and the sampling error over problems are
+        # different quantities and both belong in the table.
+        one = [1.0 if select(rng.sample(s, n), "majority") == normalise(g)
+               else 0.0 for s, g in zip(samples, golds)]
+        lo, hi = bootstrap_ci(one)
         curve.append({"n": n, "random": round(rnd, 2), "majority": round(maj, 2),
-                      "coverage": round(cov, 2), "sd": round(sd, 3)})
-        print(f"  {n:>3}  {rnd:>14.1f}%  {maj:>14.1f}%  {cov:>14.1f}%   sd={sd:.2f}")
+                      "coverage": round(cov, 2), "sd": round(sd, 3),
+                      "majority_ci95": [round(lo, 2), round(hi, 2)]})
+        print(f"  {n:>3}  {rnd:>10.1f}%  {maj:>10.1f}%  "
+              f"[{lo:.1f}, {hi:.1f}]  {cov:>10.1f}%  sd={sd:.2f}")
 
     print("  " + "-" * 58)
     print(f"\n  sd is over resamples. At N={n_max} the pool is exhausted, so"

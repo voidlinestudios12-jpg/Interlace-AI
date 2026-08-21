@@ -2,6 +2,71 @@
 
 All notable changes to `bestofn`.
 
+## 1.1.1 — 2026-08-17
+
+An adversarial audit of 1.1.0 found that some of its fixes had introduced
+defects of the same kind they were meant to remove. This release closes those,
+and adds the test coverage whose absence let them through.
+
+### Fixed
+
+- **`\boxed{(2)(3)}` returned `23`.** Redundant-parenthesis stripping did not
+  recognise multiplication by juxtaposition, so `(2)(3)` — six — became
+  twenty-three, and `(10)(10)` became `1010`. This is the same class of defect
+  as 1.0.0's comma handling: not a lost answer but a fabricated, plausible one.
+  A parenthesis touching another parenthesis is now preserved.
+- **Set braces were being deleted.** `\boxed{\{1,2,3\}}` compared equal to the
+  tuple `(1,2,3)`, and `\{1\}` compared equal to the scalar `1`. Set delimiters
+  now survive brace removal.
+- **Deeply nested LaTeX produced plausible-looking garbage.** Resolution
+  stopped after four levels, leaving fragments that collapsed into strings like
+  `fracfrac...22`. The bound is now 24, and anything still unresolved abstains
+  rather than voting with a fragment.
+- **Unit stripping was inconsistent.** `204\text{ km}` gave `204` but
+  `204\text{ m/s}` gave `204m/s`, splitting the vote between them. Units may
+  now contain digits, slashes and exponents.
+- **The equivalence-class representative is now the most-voted member.** It was
+  the alphabetically first, so `["2*3", "6", "6"]` returned the unevaluated
+  `2*3` even though two of three trajectories said `6`.
+- **`select(..., "oracle")` uses the same equivalence rule as `coverage()`.**
+  The two disagreed: `covered(gold)` reported an answer as reachable while the
+  oracle selector reported it as missing.
+- **Symbolic merging is bounded and computed once per call.** It ran twice per
+  `select()` and had no size limit; at 128 distinct answers a single call took
+  twenty seconds. Two distinct finite numbers now short-circuit without
+  invoking the symbolic parser at all, and pools above 24 distinct answers fall
+  back to exact matching with a warning.
+- **A positive log-probability no longer raises `OverflowError`.**
+- **`verifier_argmax` validates every score**, not only those attached to a
+  usable answer. The same pool raised under `verifier` and passed here.
+- **The sigmoid stays inside `(0, 1)`.** It saturated to exactly `0.0`, and a
+  pool of zeros degenerates into a majority vote — the failure the score-range
+  check exists to prevent.
+- **The verifier is called once per batch**, not once per trajectory. The
+  documented `batch_size` had no effect when used through `BestOfN`.
+- **Both backends exclude the terminal EOS** from the token count and the mean
+  log-probability. 1.1.0 claimed they measured the same quantity; they did not.
+
+### Added
+
+- **`Result.is_correct(gold)`** — equivalence-aware scoring. Use it instead of
+  `result.answer == gold`: a pool that agreed on `0.5` is a correct answer to a
+  gold of `1/2`, and a string comparison would score it wrong while `covered()`
+  scored it right, inflating the very gap this library exists to measure.
+- **`tests/test_engine_and_verifiers.py`** — 67 tests covering the engine, the
+  verifier adapters and the equivalence merging. None of those had any coverage
+  in 1.1.0, which is where all three of the audit's worst findings were.
+- Per-N confidence intervals in `scripts/analyse.py`.
+
+### Changed
+
+- **The published accuracy curve now goes through `select()`** rather than
+  reimplementing the vote with a `Counter`. A curve that bypasses the library
+  does not exercise its tie-breaking or its answer merging, and can drift from
+  what users actually get. Majority at N=16 moves from 54.7% to 54.8% as a
+  result.
+- Total tests: 155.
+
 ## 1.1.0 — 2026-08-17
 
 A correctness release. Every defect below was found by an adversarial audit of

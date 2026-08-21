@@ -92,6 +92,18 @@ class Result:
     def answers(self) -> List[str]:
         return [s.answer for s in self.samples]
 
+    def is_correct(self, gold: str) -> bool:
+        """Whether the selected answer matches ``gold``.
+
+        Use this rather than ``result.answer == gold``. With symbolic
+        comparison available, a pool that agreed on ``0.5`` is a correct answer
+        to a gold of ``1/2``, and a plain string comparison would score it
+        wrong while :meth:`covered` scored it right -- inflating exactly the
+        coverage-to-accuracy gap this library exists to measure.
+        """
+        from .extract import equivalent
+        return bool(self.answer) and equivalent(self.answer, gold)
+
     def covered(self, gold: str) -> bool:
         """Whether any sample reached ``gold`` (pass@N).
 
@@ -300,7 +312,13 @@ class BestOfN:
         for out in outputs:
             per_problem = []
             for o in out.outputs:
+                # Exclude the terminal EOS so this counts the same tokens as
+                # the transformers path, which masks it out of both the sum and
+                # the denominator. Without this the two backends report
+                # different quantities under the same name.
                 n_tok = len(o.token_ids)
+                if o.finish_reason == "stop" and n_tok:
+                    n_tok -= 1
                 mean_lp = None
                 if self.logprobs and o.cumulative_logprob is not None and n_tok:
                     mean_lp = o.cumulative_logprob / n_tok
@@ -492,10 +510,11 @@ class BestOfN:
 
         results = []
         for i, (problem, per_problem) in enumerate(zip(problems, raw)):
+            texts = [row["text"] for row in per_problem]
+            scores = self._score_all(problem, texts)
             samples = []
-            for row in per_problem:
+            for row, score in zip(per_problem, scores):
                 text = row["text"]
-                score = self.verifier(problem, text) if self.verifier else None
                 samples.append(Sample(
                     answer=self.extract(text),
                     text=text,
@@ -511,6 +530,27 @@ class BestOfN:
                 method=method,
             ))
         return results
+
+    def _score_all(self, problem: str, texts: Sequence[str]) -> List[Optional[float]]:
+        """Score every trajectory, in one batch when the verifier supports it.
+
+        Calling the verifier once per trajectory means one forward pass each,
+        which on a 7B reward model at N=16 is sixteen times slower than it
+        needs to be.
+        """
+        if self.verifier is None:
+            return [None] * len(texts)
+        batch = getattr(self.verifier, "score_batch", None)
+        if callable(batch):
+            try:
+                return list(batch(problem, list(texts)))
+            except Exception as exc:
+                warnings.warn(
+                    f"bestofn: batched scoring failed ({type(exc).__name__}: "
+                    f"{exc}); falling back to one call per trajectory.",
+                    RuntimeWarning, stacklevel=3,
+                )
+        return [self.verifier(problem, t) for t in texts]
 
     def __repr__(self) -> str:  # pragma: no cover
         return (f"BestOfN(model={self.model_name!r}, n={self.n}, "

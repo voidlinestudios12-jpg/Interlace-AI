@@ -11,7 +11,7 @@
 [![PyPI](https://img.shields.io/pypi/v/bestofn?color=blue)](https://pypi.org/project/bestofn/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21936832.svg)](https://doi.org/10.5281/zenodo.21936832)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-88%20passing-brightgreen)](tests/test_selectors.py)
+[![Tests](https://img.shields.io/badge/tests-155%20passing-brightgreen)](tests/test_selectors.py)
 
 ```bash
 pip install bestofn
@@ -43,6 +43,7 @@ engine = BestOfN("Qwen/Qwen2.5-0.5B-Instruct", n=16)
 r = engine.solve(problem)
 
 r.answer            # what the system returns
+r.is_correct(gold)  # did it match? (equivalence-aware, unlike ==)
 r.covered(gold)     # whether any of the 16 trajectories found it
 r.effective_n       # how many actually voted -- often fewer than you paid for
 ```
@@ -88,17 +89,17 @@ weights frozen, one RTX 3060. Every figure below is recomputed from the
 published trajectories by `scripts/analyse.py`, which re-runs extraction over
 the raw reasoning text.
 
-| N | random | majority | coverage |
-|---:|---:|---:|---:|
-| 1 | 36.1% | 36.1% | 36.1% |
-| 2 | 40.6% | 40.6% | 47.2% |
-| 4 | 42.6% | 47.4% | 57.6% |
-| 8 | 43.2% | 52.8% | 66.7% |
-| **16** | 43.5% | **54.7%** | 74.5% |
+| N | random | majority | 95% CI | coverage |
+|---:|---:|---:|---:|---:|
+| 1 | 36.1% | 36.1% | [31.0, 44.0] | 36.1% |
+| 2 | 40.4% | 40.6% | [30.5, 44.0] | 47.2% |
+| 4 | 42.4% | 47.1% | [39.0, 52.5] | 57.3% |
+| 8 | 43.2% | 52.8% | [48.5, 62.0] | 66.8% |
+| **16** | 43.5% | **54.8%** | [49.0, 62.5] | 74.5% |
 
 ![GSM8K, and how much of the gain is actually selection](https://huggingface.co/InterlaceAI/best-of-n/resolve/main/figures/06_gsm8k_11.png)
 
-Majority voting at N=16: **54.7%**, 95% CI [47.5, 61.5]. Against random
+Majority voting at N=16: **54.8%**. Against random
 selection at the same N, exact McNemar gives **p = 4.2 × 10⁻⁷** — majority wins
 on 32 problems where random loses, and loses on 3.
 
@@ -111,12 +112,12 @@ be read:
 |---|---:|---:|
 | N=1, a single sample | 36.1% | |
 | N=16, **random** among the trajectories that answered | 43.5% | **+7.3** |
-| N=16, **majority vote** | 54.7% | **+11.3** |
-| | | **+18.6 total** |
+| N=16, **majority vote** | 54.8% | **+11.3** |
+| | | **+18.7 total** |
 
 Random selection improves with N *without selecting anything*, because with
 more trajectories there is almost always one that did not abstain. **Of the
-18.6 points, 7.3 are simply avoiding abstention and only 11.3 come from
+18.7 points, 7.4 are simply avoiding abstention and only 11.3 come from
 voting.**
 
 Comparing a single-sample baseline against an N-sample system counts the first
@@ -138,7 +139,7 @@ separately.
 usable. In version 1.0.0 those 919 trajectories voted anyway, with whatever
 number happened to appear last in an unfinished chain of thought.
 
-Coverage at N=16 is 74.5% against 54.7% returned. Some of that 19.8-point
+Coverage at N=16 is 74.5% against 54.8% returned. Some of that 19.7-point
 distance is a selection problem a verifier could attack; some of it is single
 correct answers among sixteen, which no selector can identify without the
 label.
@@ -272,7 +273,7 @@ beam search.
 
 What this adds: the selection layer the serving stacks deliberately leave out
 (vLLM removed `best_of` in 2025, SGLang discourages `n>1`, LMDeploy supports
-only 1), a single small API over five interchangeable selectors, and the raw
+only 1), a single small API over six interchangeable selectors, and the raw
 trajectories behind every published number.
 
 ---

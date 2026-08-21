@@ -11,20 +11,22 @@ Extractors provided, plus support for any user-supplied callable:
     letter  -- last standalone A/B/C/D (multiple choice)
     regex   -- first capture group of a user pattern
 
-Two design rules, both learned the hard way:
+Three rules, all learned from defects that shipped:
 
 1. **Never invent an answer.** A trajectory with no recoverable answer returns
-   ``""`` and abstains from the vote. Guessing at the last number in an
-   unfinished chain of thought produces a phantom vote that is worse than no
-   vote, because it is indistinguishable from a real one.
+   ``""`` and abstains. Guessing at the last number in an unfinished chain of
+   thought casts a phantom vote indistinguishable from a real one. The same
+   applies to LaTeX this module cannot fully resolve: it abstains rather than
+   emit a plausible-looking fragment.
 2. **Never destroy structure while cleaning.** Commas separate tuple elements
-   as often as they group thousands, so they are handled with context rather
-   than deleted.
+   as often as they group thousands. Parentheses mark products as often as
+   they are decoration. Braces delimit sets. All are handled with context.
+3. **Never merge two different answers.** ``(2)(3)`` is six, not twenty-three;
+   ``{1}`` is a set, not the number one.
 
-Equivalence is decided in :func:`normalise`. If ``math-verify`` is installed
-(``pip install "bestofn[math]"``) it is used for symbolic comparison, so
-``1/2``, ``0.5`` and ``\\frac{2}{4}`` count as the same vote. Without it, a
-conservative textual canonicalisation is used.
+Equivalence is decided in :func:`normalise` and :func:`equivalent`. With
+``math-verify`` installed (``pip install "bestofn[math]"``) comparison is
+symbolic, so ``1/2``, ``0.5`` and ``\\frac{2}{4}`` count as one answer.
 
 Copyright 2026 Alejandro Areces Rivera - Interlace AI. Apache License 2.0.
 """
@@ -36,8 +38,8 @@ import re
 import warnings
 from typing import Callable, Optional, Union
 
-__all__ = ["extract_boxed", "extract_number", "extract_letter",
-           "normalise", "get_extractor", "Extractor", "have_math_verify"]
+__all__ = ["extract_boxed", "extract_number", "extract_letter", "normalise",
+           "equivalent", "get_extractor", "Extractor", "have_math_verify"]
 
 Extractor = Callable[[str], str]
 
@@ -45,15 +47,15 @@ Extractor = Callable[[str], str]
 # --------------------------------------------------------------- math-verify
 
 def _load_math_verify():
-    """Return math-verify's (parse, verify) pair, or ``None`` if unavailable.
+    """Return math-verify's ``(parse, verify)``, or ``None`` if unavailable.
 
     Optional on purpose: the selectors must run with zero dependencies so the
-    package stays installable anywhere, but symbolic equivalence is strictly
-    better than string matching when it is available.
+    package installs anywhere, but symbolic equivalence beats string matching
+    whenever it is available.
 
-    Its own timeout machinery is disabled at the call site (it spawns worker
-    processes, which fail on some platforms), and the resulting per-call notice
-    is silenced here so it does not flood the caller's logs.
+    Its timeout machinery is disabled at the call site -- it spawns worker
+    processes, which fail on some platforms -- and the resulting per-call
+    notice is silenced here so it does not flood the caller's logs.
     """
     try:
         from math_verify import parse, verify        # type: ignore
@@ -78,28 +80,50 @@ def have_math_verify() -> bool:
 
 # ------------------------------------------------------------ LaTeX cleaning
 
-# Purely decorative tokens. Note what is NOT here: commas, spaces and braces,
-# all of which carry meaning that deleting them would destroy.
+#: Purely decorative tokens. Note what is NOT here: commas, spaces, braces and
+#: parentheses, all of which carry meaning that deleting them would destroy.
 _LATEX_NOISE = (
     r"\left", r"\right", r"\!", r"\,", r"\;", r"\:", r"\ ",
     r"\$", r"\%", r"\quad", r"\qquad", r"\displaystyle", r"\rm",
     "$", "%",
 )
 
-# 1,000 or 1{,}000 -> 1000, but only when the commas really do group digits.
+#: 1,000 or 1{,}000 -> 1000, but only when the commas really do group digits.
 _THOUSANDS = re.compile(r"^(-?\d{1,3})((?:\{?,\}?\d{3})+)(\.\d+)?$")
 
 _TEXTUAL = re.compile(
     r"\\(?:text|mathrm|mathbf|mathit|operatorname|bm)\s*\{([^{}]*)\}"
 )
-# A whole answer written as prose -- \boxed{\text{Canberra}} -- versus a unit
-# trailing a value -- \boxed{204\text{ km}}. The first is the answer; the
-# second is decoration, and keeping it would split the vote between "204" and
-# "204km".
+
+#: A whole answer written as prose -- \boxed{\text{Canberra}} -- as opposed to
+#: a unit trailing a value -- \boxed{204\text{ km}}. The first is the answer;
+#: the second is decoration, and keeping it splits the vote between "204" and
+#: "204km".
 _ONLY_TEXT = re.compile(
     r"^\s*\\(?:text|mathrm|mathbf|mathit|operatorname|bm)\s*\{([^{}]*)\}\s*$"
 )
-_WORDS_ONLY = re.compile(r"^[A-Za-z\s.\-]+$")
+
+#: A unit can carry digits, slashes and exponents -- "m/s", "cm^2", "km2" -- so
+#: matching letters alone left those attached and split the vote.
+_UNIT_LIKE = re.compile(r"^[A-Za-z0-9\s.,\-/^*()\u00b0\u00b2\u00b3]+$")
+_HAS_LETTER = re.compile(r"[A-Za-z]")
+
+#: Private-use placeholders standing in for set braces while the grouping
+#: braces are removed. No real answer contains them.
+_LB, _RB = "\ue000", "\ue001"
+
+#: Commands this module rewrites. Any still present after resolution means the
+#: expression was nested too deeply to canonicalise, and emitting the partial
+#: result would produce a plausible-looking wrong answer.
+_UNRESOLVED = re.compile(r"\\(?:[dt]?frac|sqrt)|(?:frac|sqrt)(?=[^(a-zA-Z]|$)")
+
+_MAX_NESTING = 24
+
+
+def _is_unit(content: str) -> bool:
+    """Whether a ``\\text{...}`` group is a unit rather than the answer."""
+    c = (content or "").strip()
+    return bool(c) and bool(_HAS_LETTER.search(c)) and bool(_UNIT_LIKE.match(c))
 
 
 def _strip_thousands(s: str) -> str:
@@ -111,28 +135,28 @@ def _strip_thousands(s: str) -> str:
     return head + re.sub(r"[{},]", "", groups) + frac
 
 
-def _latex_to_text(s: str) -> str:
+def _latex_to_text(s: str) -> Optional[str]:
     """Canonicalise LaTeX into a compact, comparable text form.
 
     ``\\frac{1}{2}`` becomes ``1/2`` rather than ``1``; ``2\\sqrt{5}`` becomes
-    ``2*sqrt(5)`` rather than ``2``. Structure is preserved, which is the whole
-    point -- collapsing them onto their first digit makes different answers
-    compare equal and corrupts the vote.
+    ``2sqrt(5)`` rather than ``2``. Structure is preserved, which is the point:
+    collapsing answers onto their first digit makes different answers compare
+    equal and corrupts the vote.
+
+    Returns ``None`` when the expression could not be fully resolved, so the
+    caller abstains instead of voting with a mangled fragment.
     """
     if not s:
-        return ""
+        return None
 
     whole = _ONLY_TEXT.match(s)
-    if whole:                           # the prose IS the answer
+    if whole:                               # the prose IS the answer
         return re.sub(r"\s+", " ", whole.group(1)).strip()
 
-    # Otherwise any all-alphabetic \text{...} is a unit riding along with a
-    # value, and gets dropped; anything else is unwrapped and kept.
     s = _TEXTUAL.sub(
-        lambda m: "" if _WORDS_ONLY.match(m.group(1) or " ") else m.group(1), s
-    )
+        lambda m: "" if _is_unit(m.group(1)) else (m.group(1) or ""), s)
 
-    for _ in range(4):                      # resolve nesting, bounded
+    for _ in range(_MAX_NESTING):
         new = re.sub(r"\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}",
                      r"(\1)/(\2)", s)
         new = re.sub(r"\\sqrt\s*\[([^\]]*)\]\s*\{([^{}]*)\}",
@@ -141,6 +165,9 @@ def _latex_to_text(s: str) -> str:
         if new == s:
             break
         s = new
+
+    if re.search(r"\\[dt]?frac|\\sqrt", s):
+        return None                     # too deeply nested; abstain
 
     s = re.sub(r"\^\s*\{([^{}]*)\}", r"**(\1)", s)
     s = re.sub(r"\^(-?\w)", r"**\1", s)
@@ -154,15 +181,26 @@ def _latex_to_text(s: str) -> str:
     for tok in _LATEX_NOISE:
         s = s.replace(tok, "")
 
+    # Set braces are part of the answer: {1,2,3} is not (1,2,3), and {1} is not
+    # 1. Protect them before the grouping braces go.
+    s = s.replace("\\{", _LB).replace("\\}", _RB)
     s = s.replace("\\", "").replace("{", "").replace("}", "")
+    s = s.replace(_LB, "{").replace(_RB, "}")
     s = re.sub(r"\s+", "", s)
+
     return _strip_thousands(s.strip())
 
 
-# A parenthesis that follows an identifier is a function call -- sqrt(5), f(x)
-# -- and must survive. Only the ones this module itself introduced when
-# rewriting \frac and \sqrt are redundant.
-_REDUNDANT_PARENS = re.compile(r"(?<![A-Za-z0-9_])\((-?\d+(?:\.\d+)?)\)")
+#: A parenthesis touching an identifier is a call -- sqrt(5), f(x) -- and one
+#: touching another parenthesis is a product -- (2)(3). Both must survive:
+#: stripping them concatenates the digits and manufactures an answer, exactly
+#: as deleting commas once turned (3,4) into 34.
+_ADJACENT = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_)]"
+)
+_REDUNDANT_PARENS = re.compile(
+    r"(?<![A-Za-z0-9_)\]])\((-?\d+(?:\.\d+)?)\)(?![\(\[])"
+)
 
 
 def _atomic(inner: str) -> bool:
@@ -175,9 +213,9 @@ def _atomic(inner: str) -> bool:
         return False
     depth = 0
     for ch in inner:
-        if ch in "([":
+        if ch in "([{":
             depth += 1
-        elif ch in ")]":
+        elif ch in ")]}":
             depth -= 1
             if depth < 0:
                 return False
@@ -186,32 +224,18 @@ def _atomic(inner: str) -> bool:
     return depth == 0
 
 
-def _tidy_parens(s: str) -> str:
-    """Drop the redundant parentheses ``_latex_to_text`` introduces.
-
-    Deliberately conservative: tuple parentheses in ``(3,4)`` and call
-    parentheses in ``sqrt(5)`` carry meaning, and removing them would make
-    different answers compare equal.
-    """
-    prev = None
-    while prev != s:
-        prev = s
-        s = _REDUNDANT_PARENS.sub(r"\1", s)
-        s = _strip_atomic_parens(s)
-    return s
-
-
 def _strip_atomic_parens(s: str) -> str:
     """Remove one layer of parentheses around any single, complete term."""
     out, i = [], 0
     while i < len(s):
-        if s[i] == "(" and (i == 0 or s[i - 1] not in "abcdefghijklmnopqrstuvwxyz"
-                            "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"):
+        if s[i] == "(" and (i == 0 or s[i - 1] not in _ADJACENT):
             depth, j = 1, i + 1
             while j < len(s) and depth:
                 depth += (s[j] == "(") - (s[j] == ")")
                 j += 1
-            if depth == 0:
+            # A closing parenthesis immediately followed by an opening one is
+            # multiplication by juxtaposition, not decoration.
+            if depth == 0 and not (j < len(s) and s[j] in "(["):
                 inner = s[i + 1:j - 1]
                 if _atomic(inner):
                     out.append(inner)
@@ -220,6 +244,21 @@ def _strip_atomic_parens(s: str) -> str:
         out.append(s[i])
         i += 1
     return "".join(out)
+
+
+def _tidy_parens(s: str) -> str:
+    """Drop the redundant parentheses ``_latex_to_text`` introduces.
+
+    Deliberately conservative: tuple parentheses in ``(3,4)``, call parentheses
+    in ``sqrt(5)`` and product parentheses in ``(2)(3)`` all carry meaning, and
+    removing any of them would change the answer.
+    """
+    prev = None
+    while prev != s:
+        prev = s
+        s = _REDUNDANT_PARENS.sub(r"\1", s)
+        s = _strip_atomic_parens(s)
+    return s
 
 
 # ----------------------------------------------------------------- extractors
@@ -261,7 +300,10 @@ def extract_boxed(text: str, allow_fallback: bool = False) -> str:
     if depth > 0:                      # unclosed brace: the box was truncated
         return extract_number(text) if allow_fallback else ""
 
-    inner = _tidy_parens(_latex_to_text("".join(out)))
+    canonical = _latex_to_text("".join(out))
+    if canonical is None:
+        return extract_number(text) if allow_fallback else ""
+    inner = _tidy_parens(canonical)
     if inner:
         return inner
     return extract_number(text) if allow_fallback else ""
@@ -276,9 +318,7 @@ def extract_number(text: str) -> str:
     if not text:
         return ""
     nums = re.findall(r"-?\d{1,3}(?:,\d{3})+(?:\.\d+)?|-?\d+(?:\.\d+)?", text)
-    if not nums:
-        return ""
-    return nums[-1].replace(",", "")
+    return nums[-1].replace(",", "") if nums else ""
 
 
 def extract_letter(text: str, options: str = "ABCD") -> str:
@@ -358,19 +398,19 @@ def _numeric_key(s: str) -> Optional[str]:
 def normalise(answer: str) -> str:
     """Canonical form so equivalent answers are counted as the same vote.
 
-    ``"204"``, ``"204.0"`` and ``" 204 "`` all become ``"204"``. Exact integer
-    fractions are reduced, so ``2/4`` and ``1/2`` agree. Non-finite values are
-    rejected: a trajectory that produced ``inf`` cannot win a vote, and neither
-    can an empty one.
-
-    With ``math-verify`` installed, symbolic equivalence is used instead, which
-    additionally makes ``0.5``, ``\\frac{1}{2}`` and ``1/2`` agree.
+    ``"204"``, ``"204.0"`` and ``" 204 "`` all become ``"204"``. Digit-grouping
+    commas are removed, so a gold written ``1,000`` matches an answer of
+    ``1000``. Exact integer fractions are reduced, so ``2/4`` and ``1/2`` agree.
+    Non-finite values are rejected: a trajectory that produced ``inf`` cannot
+    win a vote, and neither can an empty one.
     """
     if answer is None:
         return ""
     s = str(answer).strip().rstrip(".")
     if not s:
         return ""
+
+    s = _strip_thousands(s)
 
     key = _numeric_key(s)
     if key is not None:
@@ -396,11 +436,11 @@ def equivalent(a: str, b: str) -> bool:
     comparing :func:`normalise` keys otherwise.
 
     Note:
-        math-verify's timeouts are implemented with worker processes, which
-        fail noisily on some platforms. They are disabled here. Answers come
-        out of a ``\\boxed{}`` and are short, so the pathological-input risk
-        the timeout guards against does not really arise; if you are feeding
-        this arbitrary text, that assumption no longer holds.
+        math-verify's timeouts spawn worker processes, which fail noisily on
+        some platforms, so they are disabled. Answers come out of a
+        ``\\boxed{}`` and are short, so the pathological-input risk the timeout
+        guards against does not really arise; if you are feeding this arbitrary
+        text, that assumption no longer holds.
     """
     na, nb = normalise(a), normalise(b)
     if not na or not nb:
@@ -408,6 +448,11 @@ def equivalent(a: str, b: str) -> bool:
     if na == nb:
         return True
     if _MATH_VERIFY is None:
+        return False
+    # Two distinct finite numbers are never the same answer, and this is by far
+    # the common case. Short-circuiting here keeps a 200-problem sweep from
+    # spending its whole budget in a symbolic parser that can only say "no".
+    if _numeric_key(na) is not None and _numeric_key(nb) is not None:
         return False
     parse, verify = _MATH_VERIFY
     try:

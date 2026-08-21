@@ -39,15 +39,33 @@ __all__ = ["sigmoid", "RewardModelVerifier", "from_hub", "from_callable",
            "license_of", "KNOWN_VERIFIERS"]
 
 
+#: Floats saturate: sigmoid(-800) rounds to exactly 0.0, and a pool of zeros
+#: makes the weighted vote degenerate back into a majority vote -- the very
+#: failure the score-range check exists to prevent. Clamping keeps the result
+#: inside the open interval the contract promises.
+_EPS = 1e-12
+
+
 def sigmoid(x: float) -> float:
     """Map an unbounded reward-model logit onto ``(0, 1)``.
 
-    Written to avoid overflow at the tails, where ``math.exp`` would raise.
+    Saturating tails are clamped away from the endpoints, so an extremely
+    negative logit yields a very small weight rather than no weight at all.
+    Non-finite input yields the neutral ``0.5`` rather than propagating a NaN
+    into the vote.
     """
-    if x >= 0:
-        return 1.0 / (1.0 + math.exp(-x))
-    e = math.exp(x)
-    return e / (1.0 + e)
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return 0.5
+    if not math.isfinite(v):
+        return 0.5 if math.isnan(v) else (1.0 - _EPS if v > 0 else _EPS)
+    if v >= 0:
+        s = 1.0 / (1.0 + math.exp(-v)) if v < 700 else 1.0
+    else:
+        e = math.exp(v) if v > -700 else 0.0
+        s = e / (1.0 + e)
+    return min(1.0 - _EPS, max(_EPS, s))
 
 
 # --------------------------------------------------------------- known models

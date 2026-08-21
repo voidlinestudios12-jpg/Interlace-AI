@@ -47,6 +47,10 @@ from .extract import equivalent, have_math_verify, normalise
 __all__ = ["Sample", "select", "agreement", "coverage", "SELECTORS",
            "effective_n", "abstentions"]
 
+#: Above this many distinct answers, symbolic merging costs more than it
+#: is worth: it is quadratic and each comparison runs a symbolic parser.
+_MERGE_LIMIT = 24
+
 SELECTORS = ("random", "majority", "self_certainty", "verifier",
              "verifier_argmax", "oracle")
 
@@ -113,6 +117,19 @@ def _finite(x) -> bool:
         return False
 
 
+def _safe_exp(x) -> float:
+    """``exp`` that saturates instead of raising.
+
+    A log-probability should never be positive, but a mis-signed backend would
+    otherwise take down the whole call with ``OverflowError`` -- an exception
+    this function does not document and the caller cannot anticipate.
+    """
+    try:
+        return math.exp(float(x))
+    except OverflowError:
+        return math.inf
+
+
 def _as_samples(samples: Sequence) -> List[Sample]:
     """Accept Sample objects, dicts, or bare answer strings."""
     out = []
@@ -142,32 +159,69 @@ def _merge_map(keys: Sequence[str]) -> Dict[str, str]:
     """Map each distinct answer onto a representative of its equivalence class.
 
     Textually different answers are often the same answer: ``1/2``, ``0.5`` and
-    ``\\frac{1}{2}`` are one result written three ways, and counting them as
+    ``\frac{1}{2}`` are one result written three ways, and counting them as
     three votes splits a bloc that should have won together. When
     ``math-verify`` is installed they are merged here.
 
-    Deterministic by construction: classes are formed over sorted keys and
-    represented by the first member, so the same pool always votes the same way.
+    The representative is the **most frequent** member of the class, breaking
+    ties towards the one seen first. Under an exact tie the label therefore
+    depends on input order -- harmlessly, since the members are equivalent by
+    construction and :meth:`Result.is_correct` scores them identically. The
+    partition itself never depends on order. Choosing it alphabetically instead -- as
+    an earlier version did -- meant a pool of ``["2*3", "6", "6"]`` returned the
+    unevaluated ``2*3``, and a class containing the gold answer could be
+    represented by something that did not match it. The winner has to be a
+    string the caller can compare against their reference.
     """
-    distinct = sorted(set(keys))
+    order: Dict[str, int] = {}
+    counts: Dict[str, int] = {}
+    for k in keys:
+        if k not in order:
+            order[k] = len(order)
+        counts[k] = counts.get(k, 0) + 1
+
+    distinct = sorted(order, key=lambda k: order[k])
     rep = {k: k for k in distinct}
     if len(distinct) < 2 or not have_math_verify():
         return rep
-    for i, k in enumerate(distinct):
-        if rep[k] != k:                 # already folded into an earlier class
-            continue
-        for other in distinct[i + 1:]:
-            if rep[other] == other and equivalent(k, other):
-                rep[other] = k
+    if len(distinct) > _MERGE_LIMIT:
+        # Merging is quadratic in distinct answers and each comparison invokes
+        # a symbolic parser. Past this point the cost is worse than the benefit,
+        # so fall back to exact matching rather than stall the caller.
+        warnings.warn(
+            f"bestofn: {len(distinct)} distinct answers exceeds the symbolic "
+            f"merge limit of {_MERGE_LIMIT}; comparing them textually instead. "
+            f"Equivalent answers written differently will vote separately.",
+            RuntimeWarning, stacklevel=3,
+        )
+        return rep
+
+    classes: List[List[str]] = []
+    for k in distinct:
+        for members in classes:
+            if equivalent(members[0], k):
+                members.append(k)
+                break
+        else:
+            classes.append([k])
+
+    for members in classes:
+        best = max(members, key=lambda m: (counts[m], -order[m]))
+        for m in members:
+            rep[m] = best
     return rep
 
 
-def _tally(samples: List[Sample], weight_fn) -> Dict[str, float]:
+def _tally(samples: List[Sample], weight_fn,
+           merge: Optional[Dict[str, str]] = None) -> Dict[str, float]:
     """Accumulate weight per answer, skipping abstentions.
 
-    Equivalent answers are pooled: see :func:`_merge_map`.
+    Equivalent answers are pooled: see :func:`_merge_map`. The caller passes
+    ``merge`` in so the quadratic symbolic comparison happens once per
+    ``select`` call rather than once per helper that needs it.
     """
-    merge = _merge_map([s.key for s in samples if s.key])
+    if merge is None:
+        merge = _merge_map([s.key for s in samples if s.key])
     weights: Dict[str, float] = defaultdict(float)
     for s in samples:
         k = s.key
@@ -176,7 +230,8 @@ def _tally(samples: List[Sample], weight_fn) -> Dict[str, float]:
     return weights
 
 
-def _winner(weights: Dict[str, float], samples: List[Sample]) -> str:
+def _winner(weights: Dict[str, float], samples: List[Sample],
+            merge: Optional[Dict[str, str]] = None) -> str:
     """Highest-weight answer, in canonical form.
 
     Returning the canonical key rather than the raw string matters: the caller
@@ -190,7 +245,8 @@ def _winner(weights: Dict[str, float], samples: List[Sample]) -> str:
         return ""
     best = max(weights.values())
     tied = {k for k, v in weights.items() if v == best}
-    merge = _merge_map([s.key for s in samples if s.key])
+    if merge is None:
+        merge = _merge_map([s.key for s in samples if s.key])
     for s in samples:               # first occurrence wins
         if merge.get(s.key, s.key) in tied:
             return merge.get(s.key, s.key)
@@ -247,7 +303,13 @@ def select(samples: Sequence, method: str = "majority",
         g = normalise(gold)
         if not g:
             return ""
-        return next((s.key for s in items if s.key == g), "")
+        hit = next((s.key for s in items if s.key == g), None)
+        if hit is not None:
+            return hit
+        # Same equivalence rule coverage() uses. Having the two disagree meant
+        # covered() said yes while the oracle selector said no.
+        return next((s.key for s in items
+                     if s.key and equivalent(s.answer, gold)), "")
 
     if method == "random":
         pool = _voting(items)
@@ -263,11 +325,17 @@ def select(samples: Sequence, method: str = "majority",
                 "method='verifier_argmax' requires a finite Sample.score on at "
                 "least one sample with an extractable answer"
             )
-        _check_scores(scored)
+        # Validate every score, not only the ones attached to a usable answer:
+        # otherwise the same pool raises under 'verifier' and passes here.
+        _check_scores(items)
         return max(scored, key=lambda s: float(s.score)).key
 
+    # Computed once and threaded through: it is quadratic in distinct answers
+    # and each comparison runs a symbolic parser.
+    merge = _merge_map([s.key for s in items if s.key])
+
     if method == "majority":
-        weights = _tally(items, lambda s: 1.0)
+        weights = _tally(items, lambda s: 1.0, merge)
 
     elif method == "self_certainty":
         if not any(_finite(s.logprob) for s in items):
@@ -279,7 +347,8 @@ def select(samples: Sequence, method: str = "majority",
         # silently randomise the result.
         weights = _tally(
             items,
-            lambda s: math.exp(s.logprob) if _finite(s.logprob) else 0.0,
+            lambda s: _safe_exp(s.logprob) if _finite(s.logprob) else 0.0,
+            merge,
         )
 
     elif method == "verifier":
@@ -289,7 +358,7 @@ def select(samples: Sequence, method: str = "majority",
             )
         _check_scores(items)
         weights = _tally(
-            items, lambda s: float(s.score) if _finite(s.score) else 0.0
+            items, lambda s: float(s.score) if _finite(s.score) else 0.0, merge
         )
 
     else:
@@ -314,7 +383,7 @@ def select(samples: Sequence, method: str = "majority",
             return select(items, "majority")
         return ""
 
-    return _winner(weights, items)
+    return _winner(weights, items, merge)
 
 
 def agreement(samples: Sequence) -> float:
