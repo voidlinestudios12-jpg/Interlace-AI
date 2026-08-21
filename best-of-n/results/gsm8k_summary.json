@@ -1,0 +1,51 @@
+{
+  "problems": 200,
+  "n_generated": 16,
+  "per_trajectory_accuracy": 36.22,
+  "abstention_rate": 28.72,
+  "truncation_rate": 24.0,
+  "total_tokens": 985545,
+  "curve": [
+    {
+      "n": 1,
+      "random": 36.13,
+      "majority": 36.13,
+      "coverage": 36.13,
+      "sd": 2.193
+    },
+    {
+      "n": 2,
+      "random": 40.6,
+      "majority": 40.64,
+      "coverage": 47.17,
+      "sd": 2.28
+    },
+    {
+      "n": 4,
+      "random": 42.64,
+      "majority": 47.39,
+      "coverage": 57.59,
+      "sd": 2.061
+    },
+    {
+      "n": 8,
+      "random": 43.19,
+      "majority": 52.79,
+      "coverage": 66.69,
+      "sd": 1.575
+    },
+    {
+      "n": 16,
+      "random": 43.46,
+      "majority": 54.73,
+      "coverage": 74.5,
+      "sd": 0.714
+    }
+  ],
+  "mcnemar_majority_vs_random": {
+    "majority_only": 32,
+    "random_only": 3,
+    "p_value": 0.0
+  },
+  "reextraction_drift": 0
+}

@@ -1,8 +1,18 @@
-# Usage and configuration
+# Using Best-of-N
 
-Complete guide to `bestofn`. If you only read one section, read
-[Choosing N](#choosing-n) and [Choosing a selector](#choosing-a-selector) —
-those two decisions determine most of your accuracy.
+A practical guide: how to install it, how to read what it tells you, how to
+plug in a reward model, and the failure modes worth knowing before you trust a
+number.
+
+- [Install](#install)
+- [The thirty-second version](#the-thirty-second-version)
+- [Reading the diagnostic](#reading-the-diagnostic)
+- [Choosing N](#choosing-n)
+- [Selectors](#selectors)
+- [Using someone else's reward model](#using-someone-elses-reward-model)
+- [Answer extraction](#answer-extraction)
+- [Measuring honestly](#measuring-honestly)
+- [Failure modes](#failure-modes)
 
 ---
 
@@ -12,289 +22,285 @@ those two decisions determine most of your accuracy.
 pip install bestofn
 ```
 
-The package itself has no dependencies — the selectors run anywhere. To
-generate samples you also need a backend:
+The package itself has no dependencies, so the selectors run anywhere. Add what
+you need:
 
 ```bash
-pip install torch transformers   # works everywhere
-pip install vllm                 # strongly recommended; required for large N
+pip install "bestofn[math]"           # symbolic answer comparison, recommended
+pip install torch transformers        # to run a model locally
+pip install vllm                      # much faster; required for large N
 ```
 
-To run the test suite or replay the published measurements, get the repository
-as well — those files are not shipped in the wheel:
-
-```python
-from huggingface_hub import snapshot_download
-snapshot_download("InterlaceAI/best-of-n", local_dir="best-of-n")
-```
-
-```bash
-cd best-of-n && python tests/test_selectors.py    # 45 tests, no GPU needed
-```
+`[math]` pulls in `math-verify`. Without it, `1/2` and `0.5` are counted as two
+different votes rather than one. For integer answers it makes no difference;
+for anything else it matters.
 
 ---
 
-## Quickstart
+## The thirty-second version
 
 ```python
 from bestofn import BestOfN
 
-engine = BestOfN("deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B", n=32)
+engine = BestOfN("Qwen/Qwen2.5-0.5B-Instruct", n=16)
+r = engine.solve("A train travels at 60 km/h for 3 hours. How far?")
 
-result = engine.solve("Find the number of ordered pairs (a,b) with a+b=100 and a,b>0.")
-
-print(result.answer)       # selected answer
-print(result.n)            # 32
-print(result.agreement)    # 0.0-1.0, how much the samples agreed
+r.answer          # '180'
+r.agreement       # 0.81  -- how much the voters agreed
+r.effective_n     # 13    -- how many of the 16 actually voted
 ```
 
-Works with **any causal language model** on the Hub — swap the first argument.
+---
+
+## Reading the diagnostic
+
+This is the part worth learning, because it is what turns the library from a
+wrapper into a tool.
+
+```python
+r = engine.solve(problem)
+
+r.n              # trajectories you paid for
+r.effective_n    # trajectories that produced a usable answer
+r.n_abstained    # produced nothing
+r.n_truncated    # ran out of tokens
+r.total_tokens   # what it cost
+r.agreement      # agreement among the ones that voted
+```
+
+**When `effective_n` is well below `n`, fix that before anything else.** You are
+paying for trajectories that contribute nothing to the answer, and every
+per-sample statistic you compute is wrong. The usual cause is `max_tokens`
+being too low for the model's reasoning style — check `n_truncated` — or the
+model not using `\boxed{}` — check the prompt.
+
+Then compare what was returned against what was reachable:
+
+```python
+returned  = r.answer == gold
+reachable = r.covered(gold)
+```
+
+| `returned` | `reachable` | What it means | What to do |
+|---|---|---|---|
+| ✗ | ✗ | The model never found it | More samples will not help. Better model, or better prompt |
+| ✗ | ✓ | Found it and threw it away | A **selection** problem. A verifier can fix this |
+| ✓ | ✓ | Working | Consider whether you need this much N |
+
+That table is the whole method. Coverage tells you what is inside the model;
+the selector tells you how much of it you can get out.
+
+> **On `covered()`:** it is a diagnostic, not a target. The problems that
+> sustain its tail are single correct answers among N — by definition never the
+> mode, and indistinguishable from noise without the label. Treating the gap
+> between coverage and accuracy as "headroom available" is too optimistic:
+> some of it is structurally out of reach.
 
 ---
 
 ## Choosing N
 
-`N` is your compute budget: cost and latency scale linearly with it, accuracy
-does not. Coverage follows `1 − (1−p)^N`, so it saturates.
+Cost is linear in N; accuracy is not. Coverage grows as `1 − (1−p)^N`, which
+saturates.
 
-Measured on DeepSeek-R1-Distill-Qwen-1.5B, AIME 2024:
-
-| N | Majority vote | Coverage (ceiling) |
-|---:|---:|---:|
-| 1 | 23.3% | 23.3% |
-| 8 | 40.0% | 60.0% |
-| 16 | 46.7% | 63.3% |
-| 32 | 50.0% | 73.3% |
-| 64 | 50.0% | 80.0% |
-| 128 | 53.3% | 83.3% |
-
-Practical guidance:
-
-| N | When to use |
+| Per-sample accuracy `p` | Useful range of N |
 |---|---|
-| 1 | Baseline. No benefit from this library. |
-| 4–8 | Easy tasks, tight latency. Most of the cheap gain is already here. |
-| **16–32** | **Best default.** Strong gains, manageable cost. |
-| 64–128 | Hard tasks (competition maths) where accuracy dominates cost. |
-| >128 | Rarely worth it — coverage has flattened. Improve the *selector* instead. |
+| under 10% | Best-of-N will not save you |
+| 20–60% | **the sweet spot** — this is where it pays |
+| over 80% | you are mostly paying N times for the same answer |
 
-Above N≈32 majority voting stops improving while coverage keeps rising. That
-divergence is the **selection gap**, and closing it needs a better selector,
-not more samples.
+Measure your own `p` first — it is the mean correctness across trajectories,
+and it is also exactly what random selection gets you:
+
+```python
+results = engine.solve_batch(problems, n=16)
+p = sum(s.answer == g for r, g in zip(results, golds) for s in r.samples) \
+    / sum(r.n for r in results)
+```
+
+**Do not use `n=2`.** With two trajectories there is no majority to speak of and
+ties break arbitrarily; it costs twice as much as one sample and reliably gains
+nothing. Start at 8.
 
 ---
 
-## Choosing a selector
+## Selectors
+
+Every selector runs over an existing result at no cost, so compare them:
 
 ```python
-engine.solve(problem, method="majority")     # default
+r = engine.solve(problem, n=16)
+
+r.select_with("random", seed=0)     # the baseline
+r.select_with("majority")
+r.select_with("verifier")           # needs verifier=... at construction
 ```
 
-| Method | Needs | Recovers a minority-correct answer? |
-|---|---|:---:|
-| `majority` | nothing | No |
-| `self_certainty` | log-probs (automatic) | Rarely |
-| `verifier` | a verifier callable | **Yes** |
-| `verifier_argmax` | a verifier callable | Yes, but noisier |
-| `oracle` | the gold answer | Diagnostic only |
+| Method | Needs | Notes |
+|---|---|---|
+| `random` | nothing | **The baseline.** Anything that does not beat it is doing harm |
+| `majority` | nothing | The sensible default |
+| `self_certainty` | `logprobs=True` | Measures fluency, not correctness. Often loses to `random` — check before using it |
+| `verifier` | a verifier callable | The only one that can promote a minority answer |
+| `verifier_argmax` | a verifier callable | Single best trajectory, no vote |
+| `oracle` | the gold answer | Diagnostic only, never deployable |
 
-**`majority`** — the modal answer. Free and robust. Structurally cannot pick an
-answer that most trajectories disagree with, which is exactly what happens on
-hard problems.
-
-**`self_certainty`** — weights each vote by `exp(mean token log-prob)`. Helps at
-moderate N. Measures fluency, which correlates with correctness but is not it.
-
-**`verifier`** — weights each vote by an external `P(correct)`. The only
-selector that attacks the selection gap. Measured on AIME (90 problems, N=32):
-majority 35.6% → verifier **52.2%**, a gain of 16.6 points.
-
-**`verifier_argmax`** — takes the single highest-scored trajectory. Simpler but
-measured 8.9 points *worse* than the weighted vote (43.3% vs 52.2%): one
-overconfident score can outvote a solid consensus.
-
-**`oracle`** — needs the gold answer, so it can never be deployed. Use it to
-measure your ceiling:
-
-```python
-r = engine.solve(problem, n=64)
-print("selected:", r.answer)
-print("was it reachable?", r.covered(gold))   # pass@N
-```
-
-### Reusing samples for free
-
-Generation is the expensive part. Once you have a `Result`, trying other
-selectors costs nothing:
-
-```python
-r = engine.solve(problem, n=32)
-r.answer                        # majority
-r.select_with("self_certainty")
-r.select_with("oracle", gold="42")
-```
+**Always print the `random` row.** It costs nothing and it is the difference
+between "my selector gets 53%" and "my selector gets 53% where guessing gets
+51%".
 
 ---
 
-## Using a verifier
+## Using someone else's reward model
 
-A verifier is any callable `(problem, trajectory_text) -> float in [0,1]`.
+This library does not ship a reward model. It works with published ones.
 
 ```python
-def my_verifier(problem: str, text: str) -> float:
-    return score_between_0_and_1
+from bestofn import BestOfN
+from bestofn.verifiers import from_hub
 
-engine = BestOfN(model, n=32, verifier=my_verifier)
+verifier = from_hub("openbmb/Eurus-RM-7b")          # Apache-2.0
+engine = BestOfN("your/model", n=16, verifier=verifier)
 engine.solve(problem, method="verifier")
 ```
 
-With a trained reward model:
+### The trap this used to fall into
 
-```python
-import torch
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
+Reward models emit **unbounded logits**, not probabilities. Weighting a vote by
+`-3.7` is meaningless. Passing raw logits now raises an error rather than
+quietly falling back to a majority vote:
 
-tok = AutoTokenizer.from_pretrained("your/verifier")
-vm = AutoModelForSequenceClassification.from_pretrained(
-    "your/verifier", num_labels=2, device_map={"": 0})
-vm.eval()
-
-def verifier(problem, text):
-    prompt = f"Problem:\n{problem}\n\nProposed solution:\n{text}\n\nIs it correct?"
-    ids = tok(prompt, return_tensors="pt", truncation=True,
-              max_length=2048).to(vm.device)
-    with torch.no_grad():
-        return torch.softmax(vm(**ids).logits.float(), -1)[0, 1].item()
+```
+ValueError: verifier scores must be probabilities in [0, 1], got
+[-0.7, -0.01]. Reward models usually return unbounded logits: apply a
+sigmoid first...
 ```
 
-Two things matter more than the architecture:
+The adapters in `bestofn.verifiers` do this for you. For your own scorer:
 
-1. **Train on problems disjoint from your evaluation set.** Contamination
-   inflates results silently. Check by normalised exact match, substring
-   containment, and n-gram overlap.
-2. **Split train/validation by problem, not by trajectory.** Otherwise
-   trajectories from the same problem land on both sides and the score is
-   meaningless.
+```python
+from bestofn.verifiers import from_callable
+
+verifier = from_callable(my_reward_model)                      # logits
+verifier = from_callable(my_scorer, already_probability=True)  # already [0,1]
+```
+
+### Licences
+
+A reward model's licence governs how you may use its scores. They are not
+uniform, and several popular ones are more restrictive than they look. Checked
+on the Hub in August 2026:
+
+| Model | Licence | Notes |
+|---|---|---|
+| `openbmb/Eurus-RM-7b` | **apache-2.0** | Cleanest of the group |
+| `OpenAssistant/reward-model-deberta-v3-large-v2` | **mit** | Small; general preference, not maths |
+| `internlm/internlm2-1_8b-reward` | other | 1.8B, the smallest usable one. Read the repo terms |
+| `Skywork/Skywork-Reward-V2-Llama-3.1-8B` | llama3.1 | Meta acceptable-use policy applies |
+| `Qwen/Qwen2.5-Math-PRM-7B` | other | Step-level PRM, not a drop-in ORM |
+
+`from_hub` warns when a licence is anything other than permissive, and
+`bestofn.verifiers.license_of(model_id)` queries the Hub live so you are not
+relying on this table staying current.
+
+> One warning worth passing on: no small discriminative reward model is known
+> to work well. `Skywork-o1-Open-PRM-1.5B` scores below chance on PRMBench in
+> its published evaluation. **Measure any verifier against `random` on your own
+> task before trusting it.**
 
 ---
 
 ## Answer extraction
 
-The default expects a final `\boxed{...}`. An extraction failure looks exactly
-like a reasoning failure in your metrics, so match the extractor to your task.
-
 ```python
-BestOfN(model, extractor="boxed")    # \boxed{...}  (default)
-BestOfN(model, extractor="number")   # last number
-BestOfN(model, extractor="letter")   # A/B/C/D multiple choice
-BestOfN(model, extractor="regex", pattern=r"Answer:\s*(\w+)")
-BestOfN(model, extractor=lambda text: text.strip().split()[-1])
+BestOfN(model, extractor="boxed")     # default: last \boxed{...}
+BestOfN(model, extractor="number")    # last number
+BestOfN(model, extractor="letter")    # multiple choice
+BestOfN(model, extractor=my_function) # anything str -> str
 ```
 
-Check it before a long run — silently broken extraction is the most common way
-to waste a night of compute:
+Two behaviours worth knowing:
+
+**A trajectory with no answer abstains.** If there is no `\boxed{}`, extraction
+returns `""` and that trajectory does not vote. It does *not* guess at the last
+number in the text — an unfinished chain of thought would otherwise cast a vote
+indistinguishable from a real one. If your model reliably answers without
+`\boxed{}`, opt in:
 
 ```python
-from bestofn import get_extractor
-ex = get_extractor("boxed")
-print(ex(r"...therefore \boxed{42}."))   # '42'
+from bestofn.extract import extract_boxed
+BestOfN(model, extractor=lambda t: extract_boxed(t, allow_fallback=True))
 ```
+
+**Structure is preserved.** `\boxed{\frac{1}{2}}` gives `1/2`, not `1`;
+`\boxed{(3,4)}` gives `(3,4)`, not `34`. With `math-verify` installed,
+equivalent answers written differently are pooled into one vote.
 
 ---
 
-## Full configuration
+## Measuring honestly
+
+If you are going to publish a number, these four things are what a reviewer
+will ask for, and all four are cheap.
+
+**1. The random baseline, in the same table.** Non-negotiable.
+
+**2. Effective N, not N.** Report how many trajectories actually voted.
+
+**3. A paired test, not a difference of percentages.** Two selectors on the
+same problems are paired data. What matters is how many problems A got right
+and B got wrong, and vice versa. `scripts/analyse.py` computes exact McNemar
+from those counts.
+
+**4. Confidence intervals.** A 30-problem benchmark at p≈0.5 has a standard
+error of about 9 points. Differences smaller than that are not differences.
+
+`scripts/analyse.py` produces all four from a trajectory file, and it
+re-extracts answers from the raw text rather than trusting the ones stored
+alongside them — so it can catch an extraction bug rather than inheriting one.
+
+---
+
+## Failure modes
+
+**`method='self_certainty' requires log-probabilities`**
+Construct with `logprobs=True`. They are off by default because collecting them
+is the most memory-hungry part of generation on the `transformers` backend.
+
+**Out of memory with `logprobs=True`**
+Lower `max_parallel`. The engine sizes it from free VRAM, but a shared GPU can
+change underneath it:
 
 ```python
-BestOfN(
-    model="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
-    n=32,                    # trajectories per problem
-    temperature=0.6,         # MUST be > 0
-    top_p=0.95,
-    max_tokens=8192,         # cap per trajectory
-    extractor="boxed",
-    prompt_suffix="\n\nPlease reason step by step, and put your final answer within \\boxed{}.",
-    backend="auto",          # "auto" | "vllm" | "transformers"
-    verifier=None,
-    # extra kwargs go to the backend:
-    gpu_memory_utilization=0.90,
-    max_model_len=16384,
-)
+BestOfN(model, n=32, logprobs=True, max_parallel=4)
 ```
 
-| Parameter | Notes |
-|---|---|
-| `temperature` | **Must be > 0.** At 0 all N samples are identical and Best-of-N gains nothing. The constructor raises if you try. 0.6–0.8 works well; higher raises coverage but lowers consensus. |
-| `max_tokens` | Reasoning trajectories are long. Too low a cap truncates them and quietly costs accuracy — in our AIME runs ~65% of trajectories hit the cap. |
-| `prompt_suffix` | Set `""` if your prompts already specify the output format. |
-| `backend` | `vllm` shares the prompt KV-cache across the N samples, so N=32 costs far less than 32 separate calls. Use it whenever you can. |
+**Everything abstains**
+Your model is not producing `\boxed{}`. Check `prompt_suffix`, or switch
+extractor, or set `allow_fallback=True` if you know its answers are trustworthy
+without the box.
+
+**`temperature must be > 0 for Best-of-N`**
+At temperature 0 all N samples are identical. Use 0.6–1.0.
+
+**Results are not reproducible between vLLM and transformers**
+Expected. Different kernels and different batching give different samples. Both
+report the same *quantity* for `logprob` as of 1.1, but the trajectories
+themselves will differ.
+
+> **Note on backends:** the `transformers` path is tested on every release. The
+> `vllm` path is exercised by the same code but has not been re-verified on
+> hardware since 1.1's changes; if you hit a discrepancy there, please open an
+> issue.
 
 ---
 
-## Batching
+## Reproducing the published numbers
 
-Always batch when solving many problems — much faster than looping:
-
-```python
-problems = [p1, p2, p3]
-results = engine.solve_batch(problems, n=32)
-accuracy = sum(r.answer == g for r, g in zip(results, golds)) / len(golds)
+```bash
+python scripts/run_gsm8k.py       # regenerate trajectories (needs a GPU)
+python scripts/analyse.py         # re-derive every number (no GPU)
 ```
 
----
-
-## Early stopping
-
-`agreement` is the fraction of samples backing the modal answer. High agreement
-early means more samples are unlikely to change the outcome:
-
-```python
-r = engine.solve(problem, n=8)
-if r.agreement < 0.5:                 # samples disagree: spend more
-    r = engine.solve(problem, n=64)
-```
-
----
-
-## Measuring the selection gap on your own task
-
-This tells you whether to buy more samples or a better selector:
-
-```python
-results = engine.solve_batch(problems, n=32)
-
-selected = sum(r.answer == g for r, g in zip(results, golds)) / len(golds)
-reachable = sum(r.covered(g) for r, g in zip(results, golds)) / len(golds)
-
-print(f"selected  {selected:.1%}")
-print(f"coverage  {reachable:.1%}")
-print(f"gap       {reachable - selected:.1%}")
-```
-
-- **Large gap** → the answer is being generated but not chosen. Invest in a
-  verifier.
-- **Small gap, low coverage** → the model rarely finds the answer at all. More
-  samples or a stronger base model.
-
----
-
-## Limitations
-
-- **Coverage is a hard ceiling.** If the model never produces the correct
-  answer, no selector recovers it. `1 − (1−p)^N` is 0 for every N when p = 0.
-- **Cost is linear in N.** N=128 costs 128 generations.
-- **Needs an extractable answer.** Designed for tasks with a comparable final
-  answer (maths, multiple choice, short factual). Open-ended generation has no
-  well-defined vote.
-- **Verifier errors amplify.** A selector is bounded by its verifier; systematic
-  verifier bias is not averaged out.
-
----
-
-## Reference
-
-Areces Rivera, A. (2026). *Modern Architecture On Advanced LLM: Best-of-N
-Sampling, Learned Verification and Tree Search as a Substitute for Parameter
-Scale.* Technical Report TR-2026-01, Interlace AI.
-[doi.org/10.5281/zenodo.21936833](https://doi.org/10.5281/zenodo.21936833)
-
-Questions: `interlaceIA@gmail.com`
+The second command works on the published trajectory file without regenerating
+anything, so you can check the results without hardware.

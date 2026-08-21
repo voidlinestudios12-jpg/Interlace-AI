@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bestofn"
+version = "1.1.0"
+description = "Inference-time compute for language models: sample N reasoning trajectories and select the best."
+readme = "README.md"
+requires-python = ">=3.8"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Alejandro Areces Rivera", email = "interlaceIA@gmail.com" }]
+keywords = [
+  "llm",
+  "best-of-n",
+  "inference-time-compute",
+  "test-time-compute",
+  "reasoning",
+  "verifier",
+  "reward-model",
+  "self-consistency",
+  "majority-voting",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Typing :: Typed",
+]
+dependencies = []
+
+[project.optional-dependencies]
+# Symbolic answer comparison. Without it, 1/2 and 0.5 are counted as different
+# votes; with it they are not. Recommended for anything beyond integer answers.
+math = ["math-verify>=0.5"]
+transformers = ["torch", "transformers"]
+vllm = ["vllm"]
+all = ["math-verify>=0.5", "torch", "transformers"]
+
+[project.urls]
+Homepage = "https://huggingface.co/InterlaceAI/best-of-n"
+Source = "https://github.com/voidlinestudios12-jpg/Interlace-AI/tree/main/best-of-n"
+Documentation = "https://github.com/voidlinestudios12-jpg/Interlace-AI/blob/main/best-of-n/USAGE.md"
+Paper = "https://doi.org/10.5281/zenodo.21936832"
+Issues = "https://github.com/voidlinestudios12-jpg/Interlace-AI/issues"
+Changelog = "https://github.com/voidlinestudios12-jpg/Interlace-AI/blob/main/best-of-n/CHANGELOG.md"
+
+[tool.setuptools]
+packages = ["bestofn"]
+
+[tool.setuptools.package-data]
+bestofn = ["py.typed"]
