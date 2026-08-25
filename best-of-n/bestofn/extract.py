@@ -32,6 +32,7 @@ Copyright 2026 Alejandro Areces Rivera - Interlace AI. Apache License 2.0.
 """
 from __future__ import annotations
 
+import functools
 import logging
 import math
 import re
@@ -155,6 +156,19 @@ def _latex_to_text(s: str) -> Optional[str]:
 
     s = _TEXTUAL.sub(
         lambda m: "" if _is_unit(m.group(1)) else (m.group(1) or ""), s)
+
+    # A mixed number has to be resolved before the general \frac rule sees it.
+    # "2\frac{1}{2}" is two and a half, but juxtaposition means multiplication
+    # everywhere else in this function, so the generic rule turns it into
+    # "2(1)/(2)" -- which every downstream parser reads as 2*(1/2) = 1. A
+    # wrong answer, silently, and a plausible-looking one. Only an integer
+    # written directly against the \frac counts; "x\frac{1}{2}" really is a
+    # product and is left alone.
+    s = re.sub(r"(?<![\w.)}])(-?\d+)\s*\\([dt]?frac)\s*\{([^{}]*)\}\s*\{([^{}]*)\}",
+               lambda m: "{0}(({1})+({2})/({3}))".format(
+                   "-" if m.group(1).startswith("-") else "",
+                   m.group(1).lstrip("-"), m.group(3), m.group(4)),
+               s)
 
     for _ in range(_MAX_NESTING):
         new = re.sub(r"\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}",
@@ -395,6 +409,30 @@ def _numeric_key(s: str) -> Optional[str]:
     return str(int(f)) if f == int(f) else repr(f)
 
 
+#: A LaTeX control word. Case matters inside one -- ``\frac`` is a command and
+#: ``\FRAC`` is nothing -- so case folding has to step over these.
+_CONTROL_WORD = re.compile(r"\\[A-Za-z]+")
+
+
+def _fold_case(s: str) -> str:
+    r"""Upper-case everything except LaTeX control words.
+
+    Folding case lets ``x=5`` and ``X=5``, or a multiple-choice ``a`` and
+    ``A``, count as one vote. Applying it to the whole string instead turns
+    ``\frac{1}{2}`` into ``\FRAC{1}{2}``, which no symbolic parser accepts:
+    :func:`normalise` and :func:`equivalent` then disagree about the same
+    answer, and ``is_correct`` reports False on a problem ``covered`` reports
+    True on. That regression shipped once; this is the guard against it.
+    """
+    out, last = [], 0
+    for m in _CONTROL_WORD.finditer(s):
+        out.append(s[last:m.start()].upper())
+        out.append(m.group(0))
+        last = m.end()
+    out.append(s[last:].upper())
+    return "".join(out)
+
+
 def normalise(answer: str) -> str:
     """Canonical form so equivalent answers are counted as the same vote.
 
@@ -425,10 +463,10 @@ def normalise(answer: str) -> str:
         num, den = num // g, den // g
         return str(num) if den == 1 else f"{num}/{den}"
 
-    return re.sub(r"\s+", "", s).upper()
+    return _fold_case(re.sub(r"\s+", "", s))
 
 
-def equivalent(a: str, b: str) -> bool:
+def _equivalent_uncached(a: str, b: str) -> bool:
     """Whether two answers should count as the same vote.
 
     Uses ``math-verify`` when available -- which recognises that ``0.5``,
@@ -463,6 +501,38 @@ def equivalent(a: str, b: str) -> bool:
         return bool(verify(pa, pb, timeout_seconds=None))
     except Exception:                   # a malformed answer is simply not equal
         return False
+
+
+@functools.lru_cache(maxsize=100_000)
+def _equivalent_cached(a: str, b: str) -> bool:
+    return _equivalent_uncached(a, b)
+
+
+def equivalent(a: str, b: str) -> bool:
+    """Whether two answers should count as the same vote.
+
+    Thin memoising wrapper over :func:`_equivalent_uncached`. Building the
+    equivalence partition takes the transitive closure over every pair, and a
+    resampled accuracy curve rebuilds it thousands of times over the same
+    small set of answer strings, so without a cache the symbolic parser is
+    called again and again on pairs it has already decided. The relation is
+    symmetric, so the key is ordered to let ``(a, b)`` and ``(b, a)`` share an
+    entry.
+
+    ``equivalent`` is a pure function of its arguments -- it consults no state
+    that can change between calls -- so caching cannot alter a result. Call
+    ``equivalent.cache_clear()`` if you swap the symbolic backend at runtime.
+    """
+    if a is None or b is None:
+        return False
+    a, b = str(a), str(b)
+    if a > b:
+        a, b = b, a
+    return _equivalent_cached(a, b)
+
+
+equivalent.cache_clear = _equivalent_cached.cache_clear      # type: ignore[attr-defined]
+equivalent.cache_info = _equivalent_cached.cache_info        # type: ignore[attr-defined]
 
 
 def warn_if_no_math_verify() -> None:

@@ -1,104 +1,139 @@
 {
   "problems": 200,
   "n_generated": 128,
-  "per_trajectory_accuracy": 41.86,
-  "abstention_rate": 21.94,
-  "truncation_rate": 20.78,
-  "total_tokens": 7773981,
+  "per_trajectory_accuracy": 45.27,
+  "abstention_rate": 3.13,
+  "truncation_rate": 0.84,
+  "total_tokens": 8434157,
   "curve": [
     {
       "n": 1,
-      "random": 41.77,
-      "majority": 41.77,
-      "coverage": 41.8,
-      "sd": 2.227,
+      "random": 45.03,
+      "majority": 45.03,
+      "coverage": 45.12,
+      "sd": 2.473,
       "majority_ci95": [
-        39.5,
-        53.0
+        39.0,
+        52.0
       ]
     },
     {
       "n": 2,
-      "random": 45.05,
-      "majority": 44.95,
-      "coverage": 52.65,
-      "sd": 2.187,
+      "random": 45.96,
+      "majority": 46.4,
+      "coverage": 56.53,
+      "sd": 2.176,
       "majority_ci95": [
-        40.0,
-        53.5
+        38.0,
+        51.5
       ]
     },
     {
       "n": 4,
-      "random": 46.3,
-      "majority": 51.57,
-      "coverage": 62.16,
-      "sd": 1.972,
+      "random": 46.46,
+      "majority": 53.02,
+      "coverage": 66.66,
+      "sd": 1.836,
       "majority_ci95": [
-        45.0,
-        59.0
+        44.0,
+        57.0
       ]
     },
     {
       "n": 8,
-      "random": 46.7,
-      "majority": 56.54,
-      "coverage": 70.47,
-      "sd": 1.758,
+      "random": 45.88,
+      "majority": 58.27,
+      "coverage": 75.01,
+      "sd": 1.696,
       "majority_ci95": [
-        49.0,
-        62.5
+        53.0,
+        66.5
       ]
     },
     {
       "n": 16,
-      "random": 46.92,
-      "majority": 59.89,
-      "coverage": 77.59,
-      "sd": 1.639,
+      "random": 46.23,
+      "majority": 61.65,
+      "coverage": 81.67,
+      "sd": 1.397,
       "majority_ci95": [
-        52.0,
-        66.0
+        55.5,
+        69.0
       ]
     },
     {
       "n": 32,
-      "random": 46.61,
-      "majority": 62.09,
-      "coverage": 83.19,
-      "sd": 1.318,
+      "random": 45.98,
+      "majority": 64.11,
+      "coverage": 86.74,
+      "sd": 1.272,
       "majority_ci95": [
-        57.0,
-        70.0
+        57.5,
+        70.5
       ]
     },
     {
       "n": 64,
-      "random": 46.66,
-      "majority": 63.93,
-      "coverage": 87.79,
-      "sd": 1.001,
+      "random": 46.21,
+      "majority": 65.44,
+      "coverage": 90.57,
+      "sd": 1.093,
       "majority_ci95": [
-        55.5,
-        68.5
+        59.0,
+        72.0
       ]
     },
     {
       "n": 128,
-      "random": 46.87,
-      "majority": 65.0,
-      "coverage": 91.0,
+      "random": 46.3,
+      "majority": 66.5,
+      "coverage": 93.5,
       "sd": 0.0,
       "majority_ci95": [
-        58.5,
-        71.5
+        60.5,
+        73.0
       ]
     }
   ],
   "mcnemar_majority_vs_random": {
-    "majority_only": 38,
-    "random_only": 4,
-    "p_value": 0.0
+    "majority_only": 44,
+    "random_only": 6,
+    "p_value": 3.244e-08
   },
+  "selectors_at_n_max": [
+    {
+      "selector": "random",
+      "accuracy": 47.5,
+      "ci95": [
+        40.5,
+        54.5
+      ]
+    },
+    {
+      "selector": "majority",
+      "accuracy": 66.5,
+      "ci95": [
+        60.5,
+        73.0
+      ]
+    },
+    {
+      "selector": "self_certainty",
+      "accuracy": 66.5,
+      "ci95": [
+        60.5,
+        73.0
+      ]
+    },
+    {
+      "selector": "oracle",
+      "accuracy": 93.5,
+      "ci95": [
+        90.0,
+        96.5
+      ]
+    }
+  ],
+  "symbolic_merge_capped_calls": 28,
   "reextraction_drift": 0
 }

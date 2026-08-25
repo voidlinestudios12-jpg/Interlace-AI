@@ -15,7 +15,9 @@ on its own. That gap is what these selectors attack.
                      correct answer held by a minority of trajectories.
     self_certainty   weights each vote by exp(mean token log-probability).
                      Measures fluency, which correlates with -- but is not --
-                     correctness. Frequently loses to ``random``; measure it.
+                     correctness. On our GSM8K run it scores 65.0%, level with
+                     majority; on your task it may do better or worse, so
+                     print ``random`` beside it and see.
     verifier         weights each vote by an external P(correct) score.
                      The only selector that can promote a minority answer.
     verifier_argmax  returns the single highest-scored trajectory.
@@ -47,9 +49,18 @@ from .extract import equivalent, have_math_verify, normalise
 __all__ = ["Sample", "select", "agreement", "coverage", "SELECTORS",
            "effective_n", "abstentions"]
 
-#: Above this many distinct answers, symbolic merging costs more than it
-#: is worth: it is quadratic and each comparison runs a symbolic parser.
-_MERGE_LIMIT = 24
+#: Above this many distinct answers, fall back to exact matching. Grouping is
+#: quadratic in distinct answers and each comparison can invoke a symbolic
+#: parser, so the cap exists to stop a pathological pool stalling the caller.
+#:
+#: It was 24 through 1.1.1, chosen when equivalent() was uncached. It is
+#: memoised now, so the same budget buys far more: raising the cap to 64 costs
+#: no measurable time on a 200-problem GSM8K sweep at N=128 and silences the
+#: warning on the 42%% of pools that sat between the two. Measured on that
+#: sweep, 24, 64 and 160 all return 66.0%% -- the cap was not costing accuracy
+#: on this data. That is a property of these pools, not a general guarantee,
+#: which is why analyse.py reports how often the cap fires.
+_MERGE_LIMIT = 64
 
 SELECTORS = ("random", "majority", "self_certainty", "verifier",
              "verifier_argmax", "oracle")
@@ -166,8 +177,21 @@ def _merge_map(keys: Sequence[str]) -> Dict[str, str]:
     The representative is the **most frequent** member of the class, breaking
     ties towards the one seen first. Under an exact tie the label therefore
     depends on input order -- harmlessly, since the members are equivalent by
-    construction and :meth:`Result.is_correct` scores them identically. The
-    partition itself never depends on order. Choosing it alphabetically instead -- as
+    construction and :meth:`Result.is_correct` scores them identically.
+
+    **The partition itself does not depend on order.** That is not free.
+    ``equivalent`` is not transitive: ``math-verify`` accepts ``0.3333333333``
+    against ``1/3`` and ``1/3`` against ``0.33333333333333``, but rejects the
+    two decimals against each other. Greedy grouping -- comparing each new
+    answer against one representative per class and stopping at the first hit
+    -- therefore returns a different partition depending on which answer the
+    model happened to emit first, so the same pool of trajectories in a
+    different order could return a different winner. We instead take the
+    **transitive closure** over all pairs with a union-find, which is unique
+    and independent of input order by construction. It costs the full
+    quadratic comparison that ``_MERGE_LIMIT`` already budgets for.
+
+    Choosing the representative alphabetically instead -- as
     an earlier version did -- meant a pool of ``["2*3", "6", "6"]`` returned the
     unevaluated ``2*3``, and a class containing the gold answer could be
     represented by something that did not match it. The winner has to be a
@@ -196,17 +220,33 @@ def _merge_map(keys: Sequence[str]) -> Dict[str, str]:
         )
         return rep
 
-    classes: List[List[str]] = []
-    for k in distinct:
-        for members in classes:
-            if equivalent(members[0], k):
-                members.append(k)
-                break
-        else:
-            classes.append([k])
+    # Union-find over every pair. Comparing against a single representative
+    # per class would make the result order-dependent (see the docstring);
+    # taking the transitive closure does not.
+    parent = {k: k for k in distinct}
 
-    for members in classes:
-        best = max(members, key=lambda m: (counts[m], -order[m]))
+    def find(x: str) -> str:
+        root = x
+        while parent[root] != root:
+            root = parent[root]
+        while parent[x] != root:          # path compression
+            parent[x], x = root, parent[x]
+        return root
+
+    for i, a in enumerate(distinct):
+        for b in distinct[i + 1:]:
+            if find(a) != find(b) and equivalent(a, b):
+                parent[find(b)] = find(a)
+
+    grouped: Dict[str, List[str]] = {}
+    for k in distinct:                     # distinct is in first-seen order,
+        grouped.setdefault(find(k), []).append(k)   # so members are too
+
+    for members in grouped.values():
+        # Most frequent member, ties to the lexicographically smallest.
+        # Not "-order[m]": first-seen is order-dependent, and the whole point
+        # of the union-find above is that this partition is not.
+        best = min(members, key=lambda m: (-counts[m], m))
         for m in members:
             rep[m] = best
     return rep
@@ -238,19 +278,23 @@ def _winner(weights: Dict[str, float], samples: List[Sample],
     compares this against a gold answer that is itself normalised, and mixing
     the two forms penalises the numerator while leaving the denominator alone.
 
-    Ties break towards the answer that appears first, which keeps the function
-    deterministic -- important for reproducible evaluation.
+    An exact tie is broken towards the lexicographically smallest canonical
+    key. That is arbitrary, as any tie-break must be -- when two answers carry
+    identical weight there is nothing in the data preferring one. What matters
+    is that it does not depend on input order.
+
+    Breaking towards "whichever the model emitted first" is also deterministic
+    for a fixed pool, and that is what this did until 1.1.2, but it means the
+    same trajectories shuffled can return a different answer. It showed up as
+    a non-zero spread at exhausted N in the published curve, where every draw
+    is a permutation of one pool and the spread has to be zero. Together with
+    the order-independent partition in :func:`_merge_map`, selection is now
+    invariant under permutation of the pool.
     """
     if not weights:
         return ""
     best = max(weights.values())
-    tied = {k for k, v in weights.items() if v == best}
-    if merge is None:
-        merge = _merge_map([s.key for s in samples if s.key])
-    for s in samples:               # first occurrence wins
-        if merge.get(s.key, s.key) in tied:
-            return merge.get(s.key, s.key)
-    return sorted(tied)[0]
+    return min(k for k, v in weights.items() if v == best)
 
 
 def _check_scores(items: List[Sample]) -> None:

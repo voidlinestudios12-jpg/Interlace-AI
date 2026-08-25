@@ -52,17 +52,18 @@ from bestofn import BestOfN
 engine = BestOfN("your/model", n=16)
 r = engine.solve(problem)
 
-r.answer          # what the system returns
-r.covered(gold)   # whether the answer was reachable at all
+r.answer             # what the system returns
+r.is_correct(gold)   # was it right?
+r.covered(gold)      # was it reachable at all?
 ```
 
 <div align="center">
 
 | | single sample | **Best-of-128** |
 |---|---:|---:|
-| **GSM8K**, Qwen2.5-0.5B frozen | 41.8% | **65.0%** |
+| **GSM8K**, Qwen2.5-0.5B frozen | 45.0% | **66.5%** |
 
-**+23.2 points, and the weights were never touched.**
+**+21.5 points, and the weights were never touched.**
 
 </div>
 
@@ -90,11 +91,21 @@ selection — a decision most tooling leaves you to guess at.
 picking a trajectory at random is not selecting anything. Our tables carry that
 row, and so should everyone's.
 
+**Selection is invariant under permutation of the pool.** Shuffle the samples,
+get the same answer. Symbolic equivalence is not transitive, so this takes a
+transitive closure over the answer classes and a tie-break that does not depend
+on arrival order — and you can see it in our published curve, where the spread
+at exhausted N is exactly zero.
+
+**We report how much of the gain is not the method.** With more samples, one of
+them usually did not abstain, and that alone lifts a random pick. Here it is
+1.3 of 21.5 points; we print it beside the headline instead of banking it.
+
 **The raw trajectories are published.** Not a summary — the complete reasoning
 text of every sample, with token counts, finish reasons and log-probabilities.
 The analysis script re-extracts answers from that text, so it can catch a
 parsing bug rather than inherit one. Anyone can reproduce every figure we
-publish in about a minute, with no GPU.
+publish in about two minutes, with no GPU.
 
 ---
 
@@ -115,7 +126,7 @@ best-of-n/
   bestofn/          The library: engine, extractors, selectors, verifier adapters
   scripts/          Run the benchmark, re-derive every published number
   results/          Complete reasoning trajectories behind the measurements
-  tests/            155 tests, no GPU required
+  tests/            175 tests, no GPU required
   figures/          Charts and the code that produces them
   CHANGELOG.md      What changed and why
 

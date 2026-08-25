@@ -41,7 +41,10 @@ DEFAULTS = dict(
     model="Qwen/Qwen2.5-0.5B-Instruct",
     n=16,
     problems=200,
-    max_tokens=400,
+    # 400 truncated 20.8%% of trajectories on the 1.1 run, and a truncated
+    # trajectory abstains -- it costs generation time and casts no vote. 1024
+    # leaves GSM8K reasoning room to reach the box on this model class.
+    max_tokens=1024,
     temperature=0.7,
     top_p=0.95,
     seed=20260815,

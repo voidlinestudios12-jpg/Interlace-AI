@@ -39,7 +39,9 @@ def main():
         # a trajectory at random is not selecting, it is adding noise.
         rnd = r.select_with("random", seed=0)
 
-        hit = r.answer == gold
+        # Not `r.answer == gold`: is_correct() applies the same
+        # canonicalisation the vote used, so 0.5 scores against 1/2.
+        hit = r.is_correct(gold)
         selected += hit
         reachable += r.covered(gold)
 

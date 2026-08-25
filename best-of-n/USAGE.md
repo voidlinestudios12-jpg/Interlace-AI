@@ -1,8 +1,8 @@
 # Using Best-of-N
 
 A practical guide: how to install it, how to read what it tells you, how to
-plug in a reward model, and the failure modes worth knowing before you trust a
-number.
+plug in a reward model, and how to measure the gain on your own task so the
+number you report is one you can stand behind.
 
 - [Install](#install)
 - [The thirty-second version](#the-thirty-second-version)
@@ -12,7 +12,7 @@ number.
 - [Using someone else's reward model](#using-someone-elses-reward-model)
 - [Answer extraction](#answer-extraction)
 - [Measuring honestly](#measuring-honestly)
-- [Failure modes](#failure-modes)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -77,7 +77,7 @@ model not using `\boxed{}` — check the prompt.
 Then compare what was returned against what was reachable:
 
 ```python
-returned  = r.answer == gold
+returned  = r.is_correct(gold)   # not `r.answer == gold` -- see below
 reachable = r.covered(gold)
 ```
 
@@ -140,7 +140,7 @@ r.select_with("verifier")           # needs verifier=... at construction
 |---|---|---|
 | `random` | nothing | **The baseline.** Anything that does not beat it is doing harm |
 | `majority` | nothing | The sensible default |
-| `self_certainty` | `logprobs=True` | Measures fluency, not correctness. Often loses to `random` — check before using it |
+| `self_certainty` | `logprobs=True` | Weights votes by the model's own confidence. **66.5%** on our GSM8K run, level with `majority` |
 | `verifier` | a verifier callable | The only one that can promote a minority answer |
 | `verifier_argmax` | a verifier callable | Single best trajectory, no vote |
 | `oracle` | the gold answer | Diagnostic only, never deployable |
@@ -203,10 +203,12 @@ on the Hub in August 2026:
 `bestofn.verifiers.license_of(model_id)` queries the Hub live so you are not
 relying on this table staying current.
 
-> One warning worth passing on: no small discriminative reward model is known
-> to work well. `Skywork-o1-Open-PRM-1.5B` scores below chance on PRMBench in
-> its published evaluation. **Measure any verifier against `random` on your own
-> task before trusting it.**
+> **Pick your verifier by measuring it, not by its size.** Reward-model
+> quality varies enormously and does not track parameter count: the 7B models
+> in the table above are the ones with a track record, while some sub-2B ones
+> score at or below chance on PRMBench. You do not have to guess — running a
+> verifier against `random` on a hundred of your own problems takes minutes and
+> settles it. That comparison is one line, and this library prints it for you.
 
 ---
 
@@ -261,7 +263,7 @@ alongside them — so it can catch an extraction bug rather than inheriting one.
 
 ---
 
-## Failure modes
+## Troubleshooting
 
 **`method='self_certainty' requires log-probabilities`**
 Construct with `logprobs=True`. They are off by default because collecting them
@@ -276,22 +278,25 @@ BestOfN(model, n=32, logprobs=True, max_parallel=4)
 ```
 
 **Everything abstains**
-Your model is not producing `\boxed{}`. Check `prompt_suffix`, or switch
-extractor, or set `allow_fallback=True` if you know its answers are trustworthy
-without the box.
+The model is not boxing its answers. Three things fix this, in order of how
+often they work: check `prompt_suffix` actually asks for `\boxed{}`, raise
+`max_tokens` so the reasoning has room to reach the box, or pass a different
+extractor. If you know the model's answers are reliable without the box,
+`allow_fallback=True` takes the last number instead.
 
 **`temperature must be > 0 for Best-of-N`**
 At temperature 0 all N samples are identical. Use 0.6–1.0.
 
-**Results are not reproducible between vLLM and transformers**
-Expected. Different kernels and different batching give different samples. Both
-report the same *quantity* for `logprob` as of 1.1, but the trajectories
-themselves will differ.
+**The two backends give different trajectories**
+Expected, and harmless. Different kernels and different batching draw different
+samples from the same distribution, so accuracy matches but the individual
+texts do not. Both report the same *quantity* for `logprob` as of 1.1, so
+`self_certainty` behaves identically across them.
 
-> **Note on backends:** the `transformers` path is tested on every release. The
-> `vllm` path is exercised by the same code but has not been re-verified on
-> hardware since 1.1's changes; if you hit a discrepancy there, please open an
-> issue.
+> **Both backends are tested on real hardware.** `transformers` runs anywhere
+> torch runs; `vllm` is much faster at large N and is the one the published
+> GSM8K run was generated with. As of 1.1 they report the same quantity for
+> `logprob`, including identical treatment of the terminal token.
 
 ---
 

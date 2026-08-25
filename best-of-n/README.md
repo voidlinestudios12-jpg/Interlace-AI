@@ -1,3 +1,18 @@
+---
+license: apache-2.0
+library_name: bestofn
+tags:
+  - inference-time-compute
+  - test-time-compute
+  - best-of-n
+  - reasoning
+  - self-consistency
+  - reward-model
+  - evaluation
+language:
+  - en
+---
+
 <div align="center">
 
 <img src="https://huggingface.co/InterlaceAI/best-of-n/resolve/main/figures/interlace-logo.png" width="96" alt="Interlace AI">
@@ -11,7 +26,7 @@
 [![PyPI](https://img.shields.io/pypi/v/bestofn?color=blue)](https://pypi.org/project/bestofn/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21936832.svg)](https://doi.org/10.5281/zenodo.21936832)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-155%20passing-brightgreen)](tests/test_selectors.py)
+[![Tests](https://img.shields.io/badge/tests-175%20passing-brightgreen)](tests/test_selectors.py)
 
 ```bash
 pip install bestofn
@@ -39,9 +54,9 @@ than once.
 
 | | single sample | **Best-of-128** |
 |---|---:|---:|
-| **GSM8K**, Qwen2.5-0.5B frozen | 41.8% | **65.0%** |
+| **GSM8K**, Qwen2.5-0.5B frozen | 45.0% | **66.5%** |
 
-**+23.2 points. Nothing was trained.**
+**+21.5 points. Nothing was trained.**
 
 </div>
 
@@ -74,7 +89,7 @@ r = engine.solve("A train travels at 60 km/h for 3 hours. How far does it go?")
 
 r.answer          # '180'
 r.agreement       # 0.81   how strongly the trajectories agreed
-r.effective_n     # 13     how many produced a usable answer
+r.effective_n     # 15     how many produced a usable answer
 ```
 
 Works with any causal LM, at any N:
@@ -85,8 +100,9 @@ BestOfN("meta-llama/Llama-3.1-8B-Instruct", n=16)
 BestOfN("/path/to/your/local/model", n=128)
 ```
 
-Both backends are tested: `transformers` runs anywhere torch runs, and `vllm`
-is dramatically faster for large N.
+Both backends are tested on real hardware: `transformers` runs anywhere torch
+runs, and `vllm` is dramatically faster at large N — it is the one the
+measurements below were generated with.
 
 ---
 
@@ -100,49 +116,64 @@ weights frozen. Every figure is recomputed from the published trajectories by
 
 | N | random | majority | 95% CI | coverage |
 |---:|---:|---:|---:|---:|
-| 1 | 41.8% | 41.8% | [39.5, 53.0] | 41.8% |
-| 4 | 46.3% | 51.6% | [45.0, 59.0] | 62.2% |
-| 8 | 46.7% | 56.5% | [49.0, 62.5] | 70.5% |
-| 16 | 46.9% | 59.9% | [52.0, 66.0] | 77.6% |
-| 32 | 46.6% | 62.1% | [57.0, 70.0] | 83.2% |
-| 64 | 46.7% | 63.9% | [55.5, 68.5] | 87.8% |
-| **128** | 46.9% | **65.0%** | [58.5, 71.5] | **91.0%** |
+| 1 | 45.0% | 45.0% | [39.0, 52.0] | 45.1% |
+| 4 | 46.5% | 53.0% | [44.0, 57.0] | 66.7% |
+| 8 | 45.9% | 58.3% | [53.0, 66.5] | 75.0% |
+| 16 | 46.2% | 61.6% | [55.5, 69.0] | 81.7% |
+| 32 | 46.0% | 64.1% | [57.5, 70.5] | 86.7% |
+| 64 | 46.2% | 65.4% | [59.0, 72.0] | 90.6% |
+| **128** | 46.3% | **66.5%** | [60.5, 73.0] | **93.5%** |
 
-**41.8% to 65.0%** on a half-billion-parameter model, with the weights frozen
+**45.0% to 66.5%** on a half-billion-parameter model, with the weights frozen
 throughout. Against random selection at the same N, exact McNemar gives
-**p = 5.7 × 10⁻⁸** — majority wins on 38 problems where random loses, and loses
-on 4.
+**p = 3.2 × 10⁻⁸** — majority wins on 44 problems where random loses, and loses
+on 6.
 
-And **coverage reaches 91.0%**: on nine problems out of ten, this small model
-does find the right answer somewhere in its 128 attempts. That is the number
-that says how much is still on the table.
+And **coverage reaches 93.5%**: on more than nine problems out of ten, this
+small model does find the right answer somewhere in its 128 attempts. That is
+the number that says how much is still on the table.
 
 ### How much of the gain is really selection
 
-Most reports skip this, and it changes how the headline should be read:
+Most reports skip this, and it is the part that decides whether a headline
+means anything:
 
 | | | |
 |---|---:|---:|
-| N=1, a single sample | 41.8% | |
-| N=128, **random** among the trajectories that answered | 46.9% | +5.1 |
-| N=128, **majority vote** | 65.0% | **+18.1** |
-| | | **+23.2 total** |
+| N=1, a single sample | 45.0% | |
+| N=128, **random** among the trajectories that answered | 46.3% | +1.3 |
+| N=128, **majority vote** | 66.5% | **+20.2** |
+| | | **+21.5 total** |
 
 Random selection improves slightly with N without selecting anything, because
 with more trajectories one of them usually did not abstain. Separating the two
-shows that **the overwhelming majority of the gain — 18.1 of 23.2 points — is
-genuine selection**, not an artefact of the comparison.
+shows that **20.2 of the 21.5 points — 94% of the gain — is genuine
+selection**, not an artefact of comparing a one-sample baseline against an
+N-sample system.
 
-We report it this way because a single-sample baseline against an N-sample
-system quietly folds the first part into the second.
+We report it this way because that comparison quietly folds the first number
+into the second, and the size of the fold is not knowable in advance. Here it
+is small. It is small *because* the token budget lets trajectories finish; at a
+tighter budget the same experiment would have credited five times as much of
+the gain to the method.
+
+### Every selector, against the baseline
+
+| selector at N=128 | accuracy | 95% CI |
+|---|---:|---:|
+| `random` | 47.5% | [40.5, 54.5] |
+| `majority` | **66.5%** | [60.5, 73.0] |
+| `self_certainty` | 66.5% | [60.5, 73.0] |
+| `oracle` (diagnostic ceiling) | 93.5% | [90.0, 96.5] |
 
 ### The accounting
 
 | | |
 |---|---|
 | Trajectories generated | 25,600 |
-| Cast a vote | 19,983 — 78.1% |
-| Tokens generated | 7,773,981 |
+| Cast a vote | 24,799 — 96.9% |
+| Truncated at the token limit | 216 — 0.8% |
+| Tokens generated | 8,434,157 |
 | Re-extraction drift on replay | **0** |
 | Generated on | one RTX 3090, vLLM backend, ~25 minutes |
 
@@ -180,6 +211,25 @@ r.n_abstained     # produced no usable answer
 r.n_truncated     # ran out of tokens
 r.total_tokens    # what it cost
 ```
+
+---
+
+## The same pool always gives the same answer
+
+Selection here is **invariant under permutation of the trajectory pool**.
+Shuffle the samples and the returned answer does not move.
+
+That sounds like it should be free. It is not: symbolic equivalence is not
+transitive — a parser will accept `0.3333333333` against `1/3`, and `1/3`
+against `0.33333333333333`, while rejecting the two decimals against each
+other. Group answers greedily and the classes you get depend on which one the
+model happened to emit first. We take the transitive closure instead, and break
+exact ties on the canonical key rather than on arrival order.
+
+You can see it in the published output: at N=128 the resampled curve is drawing
+128 trajectories from a pool of 128, so every draw is a permutation of the same
+pool, and the reported spread is **exactly zero**. A number that is only zero
+if the property holds.
 
 ---
 
@@ -248,8 +298,8 @@ that raw text, computes exact McNemar against the random baseline, and reports
 bootstrap confidence intervals.
 
 That means the numbers above are not asserted, they are **reproduced** — by
-you, in about a minute, without hardware. Very little published work in this
-area can say that.
+you, in **about two minutes** on a laptop CPU, with no hardware. Very little
+published work in this area can say that.
 
 To regenerate from scratch:
 

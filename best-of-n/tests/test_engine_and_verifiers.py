@@ -89,7 +89,11 @@ check("is_correct on an empty answer", Result(answer="").is_correct("1"), False)
 check("is_correct plain case", Result(answer="204").is_correct("204.0"), True)
 
 print("\nREGRESSION A4 - merging must not be quadratic without a bound")
-many = [Sample(f"{i}/7") for i in range(1, 61)]
+# Sized off the constant, not a literal: this asserts that the cap fires,
+# not that the cap has any particular value, so raising _MERGE_LIMIT does not
+# silently turn this check into a no-op.
+from bestofn.select import _MERGE_LIMIT            # noqa: E402
+many = [Sample(f"{i}/7") for i in range(1, _MERGE_LIMIT + 21)]
 with warnings.catch_warnings(record=True) as caught:
     warnings.simplefilter("always")
     got = select(many, "majority")
@@ -224,5 +228,46 @@ check("SELECTORS matches what select accepts",
       all(s in bestofn.SELECTORS
           for s in ("random", "majority", "verifier", "oracle")), True)
 
+
+print("\nREGRESSION GUARD  (vLLM token accounting)")
+
+# --- M1: the mean log-probability must divide like quantities --------------
+# cumulative_logprob includes the terminal EOS; the token count excluded it.
+# Dividing one by the other inflated the magnitude by about one token in n --
+# 12.5% on this model's answer lengths -- and made the two backends report
+# different things under the same name.
+from bestofn.engine import _eos_logprob            # noqa: E402
+
+
+class _FakeOutput(object):
+    token_ids = [11, 22, 33, 99]
+    cumulative_logprob = -4.0
+    finish_reason = "stop"
+    logprobs = [{11: -1.0}, {22: -1.0}, {33: -1.5}, {99: -0.5}]
+
+
+_o = _FakeOutput()
+check("the EOS log-probability is recovered", _eos_logprob(_o), -0.5)
+check("numerator and denominator now agree",
+      round((_o.cumulative_logprob - _eos_logprob(_o)) / 3, 6),
+      round(-3.5 / 3, 6))
+
+
+class _NoLogprobs(object):
+    token_ids = [1]
+    logprobs = None
+
+
+check("missing log-probabilities do not raise", _eos_logprob(_NoLogprobs()), 0.0)
+
 print(f"\n{'='*46}\n{passed} passed, {failed} failed\n{'='*46}")
-sys.exit(1 if failed else 0)
+if __name__ == "__main__":
+    sys.exit(1 if failed else 0)
+else:
+    # Imported rather than run: every check above has already executed at
+    # import time, so expose the verdict as a single test pytest can collect.
+    # Without this the bare sys.exit above aborts collection with an
+    # INTERNALERROR -- and `pytest` is the first thing anyone who clones the
+    # repository types.
+    def test_all_checks_passed():
+        assert failed == 0, "%d checks failed" % failed

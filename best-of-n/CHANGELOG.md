@@ -2,6 +2,93 @@
 
 All notable changes to `bestofn`.
 
+## 1.1.2 — 2026-08-25
+
+A second adversarial audit went after the parts of 1.1.1 that had not been
+attacked yet: the equivalence partition, the case-folding step, the token
+budget the published run used, and the claims the documentation makes about
+all three. The numbers it re-derived from the published trajectories matched
+what we had published, but it found real defects around them. This release
+closes every one, and the GSM8K measurement has been regenerated with a token
+budget that lets the model finish.
+
+### Fixed
+
+- **The equivalence partition depended on the order of the pool.** `equivalent`
+  is not transitive — `math-verify` accepts `0.3333333333` against `1/3` and
+  `1/3` against `0.33333333333333`, but rejects the two decimals against each
+  other. Grouping greedily against one representative per class therefore
+  produced a different partition depending on which answer the model happened
+  to emit first, so the same trajectories in a different order could return a
+  different winner. Grouping is now the transitive closure over all pairs,
+  computed with a union-find, which is unique by construction. The old test
+  compared only the *sizes* of the classes and so passed over the violation;
+  it now checks the partition itself, across every permutation.
+- **Case folding destroyed LaTeX.** `normalise` ended in `.upper()`, turning
+  `\frac{1}{2}` into `\FRAC{1}{2}` — a token no symbolic parser accepts. The
+  effect was that `is_correct()` returned False on answers `covered()` called
+  True, inflating the very selection gap this library exists to measure.
+  Folding now steps over control words and still applies everywhere else, so
+  `x=5` and `X=5` remain one vote.
+- **Mixed numbers were read as products.** Juxtaposition means multiplication
+  everywhere else in the LaTeX converter, so `2\frac{1}{2}` — two and a half —
+  became `2*(1/2)` = 1. Not a lost answer but a fabricated one. Integers
+  written directly against a `\frac` are now resolved as a sum, sign included;
+  `x\frac{1}{2}` really is a product and is untouched.
+- **A verifier returning the wrong number of scores was silently tolerated.**
+  The scores are zipped against the trajectories, so a short list dropped the
+  tail of the pool: the vote still ran, still returned a plausible answer, and
+  never mentioned that it had ignored trajectories. The length is now checked,
+  and a mismatch falls back to per-trajectory scoring with a warning.
+- **The two backends still disagreed about the mean log-probability.** 1.1
+  excluded the terminal EOS token from the vLLM token *count* but left its
+  contribution in `cumulative_logprob`, so the numerator and the denominator
+  counted different things — about a 12.5% error at this model's answer
+  lengths. The EOS term is now subtracted from both.
+- **`warn_if_no_math_verify` was never called.** Without `math-verify`,
+  equivalent answers written differently vote as separate blocs and the merge
+  silently does nothing. The warning now fires once, at engine construction.
+- **The published summary reported `p_value: 0.0`.** Rounding 5.653e-08 to six
+  decimal places produces a zero, which reads as an exact result rather than
+  the number we computed. It is now written in scientific notation.
+- **`pytest` could not collect the suites.** Both test files ended in a bare
+  `sys.exit`, which aborts collection with an INTERNALERROR — and `pytest` is
+  the first thing anyone who clones the repository types. They run under
+  `pytest` and as scripts now.
+
+### Changed
+
+- **The GSM8K run was regenerated with `max_tokens=1024`.** At 400 the model
+  ran out of room on 20.8% of trajectories, and a truncated trajectory
+  abstains: it costs full generation time and casts no vote. Truncation is now
+  0.8% and 96.9% of trajectories answer. Every published figure has been
+  re-derived from the new trajectories, which are published in full as before.
+  The default in `scripts/run_gsm8k.py` has been raised to match.
+- **Every selector is now reported against the random baseline**, not just
+  majority. `self_certainty` had been described in three places as frequently
+  losing to random; nobody had measured it. It does not lose to random — the
+  claim is gone and the measurement is in its place.
+- **The symbolic-merge cap is counted instead of silenced.** The comment
+  justifying the old behaviour claimed GSM8K answers are plain integers so
+  merging has nothing to do. That is not true, and the audit demonstrated it.
+  `scripts/analyse.py` now reports how many `select()` calls hit the cap so
+  the effect on the published numbers is measured rather than assumed.
+
+### Documentation
+
+- The GitHub repository description and topics still advertised the withdrawn
+  1.0.0 result — a trained verifier and an AIME score — on the repository
+  homepage, where they were the first thing a visitor read. Replaced with what
+  the project actually does.
+- Reproducing the published figures takes about nine minutes on a laptop CPU,
+  not "about a minute". Corrected everywhere it appeared.
+- `USAGE.md` said the vLLM backend had not been re-verified on hardware while
+  `README.md` said both backends were tested. Both are tested; the run behind
+  the published numbers uses vLLM.
+- `examples/quickstart.py` and `USAGE.md` both compared `r.answer == gold`,
+  which is exactly the comparison the library's own docstring tells callers not
+  to make. Both use `is_correct()` now.
+
 ## 1.1.1 — 2026-08-17
 
 An adversarial audit of 1.1.0 found that some of its fixes had introduced

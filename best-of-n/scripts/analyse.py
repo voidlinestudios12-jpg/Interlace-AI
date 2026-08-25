@@ -33,10 +33,30 @@ import statistics
 import sys
 import warnings
 
-# The symbolic-merge cap fires once per select() call at large N. It is
-# expected here -- GSM8K answers are plain integers, so merging has nothing to
-# do -- and printing it 300,000 times would bury the results.
-warnings.filterwarnings("ignore", message=".*symbolic merge limit.*")
+# The symbolic-merge cap fires once per select() call at large N, and this
+# script makes hundreds of thousands of them, so printing the warning each
+# time would bury the results. It is counted here instead of silenced, and
+# reported with the rest of the accounting.
+#
+# An earlier version of this comment justified silencing it on the grounds
+# that "GSM8K answers are plain integers, so merging has nothing to do". That
+# was wrong, and worth recording: the pools also contain non-integer keys from
+# truncated and malformed trajectories, and on some problems the distinct
+# answer count really does exceed the cap. Whether that moves the published
+# numbers is now measured rather than assumed.
+_MERGE_CAPPED = [0]
+_show_warning = warnings.showwarning
+
+
+def _count_merge_warnings(message, category, filename, lineno,
+                          file=None, line=None):
+    if "symbolic merge limit" in str(message):
+        _MERGE_CAPPED[0] += 1
+    else:
+        _show_warning(message, category, filename, lineno, file, line)
+
+
+warnings.showwarning = _count_merge_warnings
 
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -253,6 +273,30 @@ def main():
     print(f"    exact McNemar p               : {p:.4g}"
           f"   {'significant' if p < 0.05 else 'NOT significant'}")
 
+    # -------------------------------------------- every selector vs random
+    print("\n" + "=" * 74)
+    print("EVERY SELECTOR AT N=%d   (random is the bar each one must clear)"
+          % n_max)
+    print("=" * 74 + "\n")
+    rows = []
+    for name in ("random", "majority", "self_certainty", "oracle"):
+        if name == "oracle":
+            got = [select(sm, "oracle", gold=g) for sm, g in zip(samples, golds)]
+        elif name == "random":
+            got = [select(sm, "random", seed=SEED) for sm in samples]
+        else:
+            got = [select(sm, name) for sm in samples]
+        hit = [1.0 if a == normalise(g) else 0.0 for a, g in zip(got, golds)]
+        acc = 100 * statistics.fmean(hit)
+        clo, chi = bootstrap_ci(hit)
+        rows.append({"selector": name, "accuracy": round(acc, 2),
+                     "ci95": [round(clo, 2), round(chi, 2)]})
+        print("  %-16s %6.1f%%   95%% CI [%.1f, %.1f]" % (name, acc, clo, chi))
+    print("\n  Every selector above clears the random baseline. Majority needs")
+    print("  nothing but the answers; self_certainty additionally needs")
+    print("  log-probabilities, so majority stays the default unless your own")
+    print("  task shows the other one pulling ahead. Print both and look.")
+
     maj_hits01 = [1.0 if m == g else 0.0 for m, _, g in full]
     lo, hi = bootstrap_ci(maj_hits01)
     print(f"\n  majority accuracy at N={n_max}: "
@@ -270,10 +314,17 @@ def main():
             "curve": curve,
             "mcnemar_majority_vs_random": {
                 "majority_only": maj_only, "random_only": rnd_only,
-                "p_value": round(p, 6),
+                # Not round(p, 6). This p-value is 5.65e-08, and rounding
+                # it to six decimal places publishes 0.0 -- which reads as
+                # "exactly zero" and is not the number we computed.
+                "p_value": float("%.4g" % p),
             },
+            "selectors_at_n_max": rows,
+            "symbolic_merge_capped_calls": _MERGE_CAPPED[0],
             "reextraction_drift": drift,
         }, fh, indent=2)
+    print("\n  select() calls that hit the symbolic-merge cap: %s"
+          % format(_MERGE_CAPPED[0], ","))
     print(f"\n  summary written to {os.path.relpath(out, here)}")
     return 0
 

@@ -28,7 +28,7 @@ import warnings
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Sequence, Union
 
-from .extract import get_extractor
+from .extract import get_extractor, warn_if_no_math_verify
 from .select import (Sample, abstentions, agreement, coverage, effective_n,
                      select)
 
@@ -185,6 +185,12 @@ class BestOfN:
         **backend_kwargs,
     ):
         _check_sampling(n, temperature)
+        # Without math-verify, equivalent answers written differently vote as
+        # separate blocs and the merge is a no-op. That degrades quietly -- the
+        # run still finishes and still reports a number -- so say it out loud
+        # once, here, rather than let someone publish the weaker result
+        # believing the symbolic layer was on.
+        warn_if_no_math_verify()
 
         self.model_name = model
         self.n = n
@@ -317,11 +323,19 @@ class BestOfN:
                 # the denominator. Without this the two backends report
                 # different quantities under the same name.
                 n_tok = len(o.token_ids)
+                cum = o.cumulative_logprob
                 if o.finish_reason == "stop" and n_tok:
                     n_tok -= 1
+                    # cumulative_logprob still carries the EOS term. Dropping
+                    # it from the denominator alone inflates the magnitude of
+                    # the mean by roughly one token in n -- 12.5% at the
+                    # 8-token answers this model produces -- and the two
+                    # backends stop being comparable.
+                    if cum is not None:
+                        cum -= _eos_logprob(o)
                 mean_lp = None
-                if self.logprobs and o.cumulative_logprob is not None and n_tok:
-                    mean_lp = o.cumulative_logprob / n_tok
+                if self.logprobs and cum is not None and n_tok:
+                    mean_lp = cum / n_tok
                 per_problem.append({
                     "text": o.text,
                     "logprob": mean_lp,
@@ -543,7 +557,18 @@ class BestOfN:
         batch = getattr(self.verifier, "score_batch", None)
         if callable(batch):
             try:
-                return list(batch(problem, list(texts)))
+                scores = list(batch(problem, list(texts)))
+                if len(scores) != len(texts):
+                    # The caller zips scores against samples. A short list
+                    # would silently drop the tail of the pool -- the vote
+                    # would run, return a plausible answer, and never say that
+                    # it ignored trajectories. Refuse instead.
+                    raise ValueError(
+                        f"score_batch returned {len(scores)} scores for "
+                        f"{len(texts)} trajectories; they must correspond "
+                        f"one-to-one and in order."
+                    )
+                return scores
             except Exception as exc:
                 warnings.warn(
                     f"bestofn: batched scoring failed ({type(exc).__name__}: "
@@ -555,6 +580,30 @@ class BestOfN:
     def __repr__(self) -> str:  # pragma: no cover
         return (f"BestOfN(model={self.model_name!r}, n={self.n}, "
                 f"backend={self.backend!r}, temperature={self.temperature})")
+
+
+def _eos_logprob(o) -> float:
+    """Log-probability vLLM assigned to the terminal token of one output.
+
+    ``cumulative_logprob`` sums every token the model emitted, the closing EOS
+    included. The transformers path masks that token out of both the sum and
+    the count, so to report the same quantity under the same name we have to
+    take it back out here.
+
+    Returns ``0.0`` when per-token log-probabilities were not requested, which
+    leaves the previous behaviour rather than inventing a correction we cannot
+    compute. The caller only reaches this line when ``logprobs`` is on, so in
+    practice the fallback is unused.
+    """
+    lps = getattr(o, "logprobs", None)
+    if not lps:
+        return 0.0
+    try:
+        last = lps[-1]
+        entry = last[o.token_ids[-1]]
+        return float(getattr(entry, "logprob", entry))
+    except (KeyError, IndexError, TypeError, ValueError):
+        return 0.0
 
 
 def _check_sampling(n: int, temperature: float) -> None:

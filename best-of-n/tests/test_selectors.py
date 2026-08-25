@@ -197,7 +197,101 @@ print("\nDETERMINISM")
 same = [Sample("7"), Sample("3"), Sample("7"), Sample("3")]
 check("ties break deterministically",
       len({select(same, "majority") for _ in range(50)}), 1)
-check("ties favour the first seen", select(same, "majority"), "7")
+check("ties break to the smallest canonical key", select(same, "majority"), "3")
+check("tie-breaking does not depend on order",
+      select(list(reversed(same)), "majority"), select(same, "majority"))
+
+import random as _rnd                                          # noqa: E402
+_pool = [Sample(x) for x in ["7", "3", "7", "3", "11", "11"]]
+_shuffled = list(_pool)
+_seen = set()
+for _i in range(60):
+    _rnd.Random(_i).shuffle(_shuffled)
+    _seen.add(select(list(_shuffled), "majority"))
+check("60 shuffles of one pool give one answer", len(_seen), 1)
+
+
+
+print("\nREGRESSION GUARDS  (these encode defects that shipped once)")
+
+# --- A1: the equivalence partition must not depend on input order ----------
+# equivalent() is not transitive: math-verify accepts 0.3333333333 ~ 1/3 and
+# 1/3 ~ 0.33333333333333 but rejects the two decimals against each other.
+# Greedy grouping against one representative per class therefore returned a
+# different partition per input order. Comparing class *sizes* -- which the
+# earlier test did -- does not catch it, because the sizes can coincide.
+from bestofn.select import _merge_map          # noqa: E402
+import itertools                               # noqa: E402
+
+
+def _partition(keys):
+    m = _merge_map(list(keys))
+    return frozenset(frozenset(k for k in m if m[k] == r)
+                     for r in set(m.values()))
+
+
+_tri = ["0.3333333333", "1/3", "0.33333333333333"]
+check("partition is identical under all input orders",
+      len({_partition(p) for p in itertools.permutations(_tri)}), 1)
+
+_mix = ["1/2", "0.5", "2/4", "7", "7.0"]
+check("partition is order-independent on a mixed pool",
+      len({_partition(p) for p in itertools.permutations(_mix)}), 1)
+
+check("the winner does not depend on pool order",
+      len({select(list(p), "majority")
+           for p in itertools.permutations(["1/3", "1/3", "0.3333333333"])}), 1)
+
+# --- A2: case folding must not destroy LaTeX control words -----------------
+# normalise() used to end in .upper(), turning FRAC into a token no symbolic
+# parser accepts, so is_correct() returned False on answers covered() called
+# True. Structure has to survive canonicalisation.
+for _cmd in ("frac{1}{2}", "sqrt{2}", "pi", "dfrac{3}{4}"):
+    _raw = "\\" + _cmd
+    check("normalise preserves " + "\\" + _cmd,
+          "\\" + _cmd.split("{")[0] in normalise(_raw), True)
+
+check("normalise still folds plain text", normalise("abc"), "ABC")
+check("normalise still folds variables", normalise("x=5"), "X=5")
+check("LaTeX and decimal still merge",
+      len(_partition(["\\" + "frac{1}{2}", "0.5"])), 1)
+
+# --- M7: say so when the symbolic layer is absent --------------------------
+# Several checks above are vacuous without math-verify: equivalent() falls
+# back to string comparison and the merge tests pass by never merging.
+from bestofn.extract import have_math_verify   # noqa: E402
+if not have_math_verify():
+    print("\n  WARNING: math-verify is not installed. The symbolic-equivalence")
+    print("  checks above passed without exercising the symbolic path.")
+    print("  Install it with:  pip install math-verify")
+
+
+# --- M5: a mixed number is a sum, not a product ----------------------------
+# Juxtaposition means multiplication everywhere else in _latex_to_text, so the
+# generic rule read "2\frac{1}{2}" -- two and a half -- as 2*(1/2) = 1. Not a
+# lost answer but a fabricated one, and a plausible enough value to match some
+# other problem's reference by accident.
+from bestofn.extract import extract_boxed, equivalent   # noqa: E402
+
+check("mixed number is two and a half, not one",
+      equivalent(extract_boxed("\\boxed" + "{2" + "\\frac" + "{1}{2}}"), "2.5"), True)
+check("mixed number is not the product",
+      equivalent(extract_boxed("\\boxed" + "{2" + "\\frac" + "{1}{2}}"), "1"), False)
+check("negative mixed number negates the whole thing",
+      equivalent(extract_boxed("\\boxed" + "{-3" + "\\frac" + "{1}{3}}"), "-10/3"), True)
+check("negative mixed number is not -3 + 1/3",
+      equivalent(extract_boxed("\\boxed" + "{-3" + "\\frac" + "{1}{3}}"), "-8/3"), False)
+check("a plain fraction is left alone",
+      equivalent(extract_boxed("\\boxed" + "{" + "\\frac" + "{5}{2}}"), "2.5"), True)
 
 print(f"\n{'='*46}\n{passed} passed, {failed} failed\n{'='*46}")
-sys.exit(1 if failed else 0)
+if __name__ == "__main__":
+    sys.exit(1 if failed else 0)
+else:
+    # Imported rather than run: every check above has already executed at
+    # import time, so expose the verdict as a single test pytest can collect.
+    # Without this the bare sys.exit above aborts collection with an
+    # INTERNALERROR -- and `pytest` is the first thing anyone who clones the
+    # repository types.
+    def test_all_checks_passed():
+        assert failed == 0, "%d checks failed" % failed
