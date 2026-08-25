@@ -2,6 +2,116 @@
 
 All notable changes to `bestofn`.
 
+## 1.1.3 — 2026-08-25
+
+A second adversarial audit, run against 1.1.2 immediately after its release.
+It re-derived every published headline independently and all of them held to
+the decimal — but it found seventeen problems in the layer of claims wrapped
+around them, including one property this project had made a selling point and
+which turned out to be true for only two of the six selectors. All seventeen
+are closed here.
+
+### Fixed
+
+- **Permutation invariance held for `majority` and `oracle` only.** 1.1.2
+  claimed, in the README and in the technical note, that shuffling the pool
+  never changes the answer. Two leaks made that false elsewhere:
+  `verifier_argmax` used `max(..., key=score)`, and `max` returns the *first*
+  maximal element, so an exact tie resolved by arrival order; and `_tally`
+  accumulated weights with `+=` in list order, which for `self_certainty` and
+  `verifier` makes the total depend on that order because floating-point
+  addition is not associative — two permutations can differ in the last bit,
+  and that is enough to flip a near-tie. Argmax now breaks ties on the
+  canonical key, and totals are summed with `math.fsum` over a sorted list,
+  which is exactly rounded. Verified across 24,000 shuffles: no selector moves.
+- **The merge-cap counter under-reported by 73×.** `symbolic_merge_capped_calls`
+  existed to justify raising `_MERGE_LIMIT`, and it published 28 where the
+  true figure is 2,040. It counted *warnings*, and Python shows a given warning
+  once per location, so repeats never reached the handler. It is now counted in
+  `_merge_map` itself and exposed as `bestofn.select.merge_cap_hits()`.
+- **`pytest` failed on a default `pip install bestofn`.** Four checks silently
+  required the optional `[math]` extra, so the suite went red for anyone who
+  installed the package as the documentation describes. They are gated now, the
+  skip count is reported through `warnings` — which pytest displays, unlike the
+  `print` that was there before — and two of the mixed-number checks were
+  rewritten to test what the extractor emits, which needs no symbolic layer.
+- **Unresolved LaTeX was voting instead of abstaining.** Rule 1 of the
+  extraction module is "never invent an answer", and it was only being enforced
+  for `\frac` and `\sqrt`. Everything else had its backslash stripped:
+  `\binom{5}{2}`, which is 10, became the vote `binom52`; a `pmatrix` became a
+  run of digits; `\geq` and `\ge` produced two different votes for one answer.
+  Any command still present after canonicalisation now abstains. Degrees and
+  the comparison operators gained plain forms rather than being lost —
+  `45^{\circ}` is 45, not `45**()`.
+- **A verifier returning the wrong number of scores was still tolerated.**
+  1.1.2 added the length check but put it inside the `try`, so its own
+  `except Exception` caught it, reported "batched scoring failed" — which had
+  not happened — and silently rescored the pool through a different code path.
+  The check is outside the `try` now and raises.
+- **The reproduction time, the self_certainty score and the merge-cap
+  measurement were each stale in one place** while correct in another: nine
+  minutes in the changelog against two in the README, 65.0% in `select.py`
+  against 66.5% in `USAGE.md`, 66.0% in a code comment against the 66.5% it was
+  meant to support. All reconciled.
+- **`normalise` destroyed integers above ~1e308.** `float()` overflows to
+  infinity and non-finite values are rejected, so a 400-digit integer — exact
+  as written, needing no float at all — normalised to the empty string and
+  abstained.
+- **Only `n` and `temperature` were validated.** `top_p=0`, `top_p=5`,
+  `max_tokens=0`, a negative `max_tokens`, a float `n` and `max_parallel=0`
+  were all accepted here and failed later inside a backend, where the user
+  reasonably blames the backend.
+- **Two chart scripts shipped with hand-typed numbers** from the previous
+  release and wrote the same filenames as the summary-driven ones, so the last
+  script run decided which figures shipped. Both now read
+  `results/gsm8k_summary.json`, and each figure has exactly one script that
+  produces it. The brand logo in them was also drawn by hand as two 0.17 × 0.30
+  rectangles; the real mark is two rounded squares, so it rendered as two tall
+  boxes with sharp corners. It is loaded from the PNG now and cannot be
+  distorted.
+- **The abstention figure attributed all 803 abstentions to truncation.** Only
+  216 are; 587 are trajectories that finished normally without leaving a usable
+  answer. Exact counts are published in the summary so a figure never has to
+  multiply a rounded percentage back out.
+- **The GitHub repository description** carried the 1.1.1 numbers under a
+  changelog entry claiming it had been corrected.
+- Smaller: a transient symbolic-backend failure could be memoised as a
+  permanent "not equal"; `verifier_argmax` said nothing when every score was
+  zero while `verifier` warned; the vLLM terminal-token correction was skipped
+  in silence when the log-probability count did not match the token count; the
+  test suite's "no network" claim was untrue; `README_PYPI.md`'s relative links
+  resolved to the PyPI project page rather than to the files.
+
+### Changed
+
+- **The headline p-value is now the worst of 200 random seeds, not one seed.**
+  `random` draws differently every time it runs, so a p-value taken from a
+  single seed is partly a property of that seed: across 200 of them ours ranged
+  from 2.4 × 10⁻¹⁴ to 1.4 × 10⁻⁵. We publish **p ≤ 1.4 × 10⁻⁵** with a median
+  of 1.5 × 10⁻⁹. The conclusion holds at every seed; the single figure we had
+  been quoting did not describe the data as firmly as it appeared to.
+- **The random baseline is reported once, consistently.** Two different values
+  — 46.3% from the resampled curve and 47.5% from one seeded draw — were being
+  published side by side as though they were the same quantity, in the README,
+  in the technical note and in two different figures. Both now report the mean
+  over 200 seeds with its spread: **46.3%, sd 2.5**.
+- **The benchmark records the configuration it ran with.** Model, N,
+  temperature, top-p, max tokens, backend and library version now go into every
+  record. The docstring had claimed this for two releases; only the prompt
+  suffix was actually stored, which is not enough to regenerate a single
+  trajectory.
+- `README.md` no longer claims the coverage/selection split is something "no
+  other library gives you". `pass@k` beside `maj@n` exists in the evaluation
+  harnesses, the technical note said so, and the two documents disagreed.
+- 175 → 177 tests.
+
+### Note on the numbers
+
+The published GSM8K results are unchanged by all of this: 45.0% → 66.5% at
+N=128, coverage 93.5%. Two trajectories that had been voting with a mangled
+repeating decimal now abstain, which moves the abstention count from 801 to
+803 and nothing else.
+
 ## 1.1.2 — 2026-08-25
 
 A second adversarial audit went after the parts of 1.1.1 that had not been
@@ -80,8 +190,9 @@ budget that lets the model finish.
   1.0.0 result — a trained verifier and an AIME score — on the repository
   homepage, where they were the first thing a visitor read. Replaced with what
   the project actually does.
-- Reproducing the published figures takes about nine minutes on a laptop CPU,
-  not "about a minute". Corrected everywhere it appeared.
+- Reproducing the published figures takes about two minutes on a laptop CPU,
+  not "about a minute". Corrected everywhere it appeared. (It was nine minutes
+  before `equivalent()` was memoised, which is where that figure came from.)
 - `USAGE.md` said the vLLM backend had not been re-verified on hardware while
   `README.md` said both backends were tested. Both are tested; the run behind
   the published numbers uses vLLM.

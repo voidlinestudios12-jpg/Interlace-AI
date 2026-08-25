@@ -15,7 +15,7 @@ on its own. That gap is what these selectors attack.
                      correct answer held by a minority of trajectories.
     self_certainty   weights each vote by exp(mean token log-probability).
                      Measures fluency, which correlates with -- but is not --
-                     correctness. On our GSM8K run it scores 65.0%, level with
+                     correctness. On our GSM8K run it scores 66.5%, level with
                      majority; on your task it may do better or worse, so
                      print ``random`` beside it and see.
     verifier         weights each vote by an external P(correct) score.
@@ -26,7 +26,16 @@ on its own. That gap is what these selectors attack.
                      only -- never a deployable selector, and never a bound on
                      what a realisable selector can achieve.
 
-Two invariants this module now guarantees, and previously did not:
+Three invariants this module now guarantees, and previously did not:
+
+* **Selection does not depend on the order of the pool.** Shuffle the samples
+  and every selector except ``random`` -- which is order-dependent by
+  definition -- returns the same answer. This needs three separate things to
+  be true: the equivalence partition is a transitive closure rather than a
+  greedy grouping (see :func:`_merge_map`), weights are summed with
+  ``math.fsum`` over a sorted list rather than accumulated in arrival order,
+  and every tie breaks on the canonical key rather than on which trajectory
+  came first.
 
 * **One normalisation everywhere.** ``select`` returns the same canonical form
   that ``coverage`` compares against. Mixing raw and canonical forms inflates
@@ -47,7 +56,29 @@ from typing import Dict, List, Optional, Sequence
 from .extract import equivalent, have_math_verify, normalise
 
 __all__ = ["Sample", "select", "agreement", "coverage", "SELECTORS",
-           "effective_n", "abstentions"]
+           "effective_n", "abstentions", "merge_cap_hits"]
+
+#: How many times :func:`_merge_map` has fallen back to exact matching because
+#: the pool held more distinct answers than ``_MERGE_LIMIT``.
+#:
+#: Counted here rather than by intercepting the warning. Python's default
+#: filter shows a given warning once per location, so counting warnings counts
+#: *distinct messages*, not calls -- and because the message embeds the
+#: distinct-answer count, near-identical pools collapsed into one. The
+#: published summary reported 28 where the true figure was 2,040.
+_MERGE_CAP_HITS = [0]
+
+
+def merge_cap_hits(reset: bool = False) -> int:
+    """Number of merge-cap fallbacks so far; pass ``reset`` to zero it.
+
+    Exposed so a benchmark can report how often symbolic merging was skipped,
+    which is the only honest way to say whether the cap cost anything.
+    """
+    n = _MERGE_CAP_HITS[0]
+    if reset:
+        _MERGE_CAP_HITS[0] = 0
+    return n
 
 #: Above this many distinct answers, fall back to exact matching. Grouping is
 #: quadratic in distinct answers and each comparison can invoke a symbolic
@@ -56,8 +87,8 @@ __all__ = ["Sample", "select", "agreement", "coverage", "SELECTORS",
 #: It was 24 through 1.1.1, chosen when equivalent() was uncached. It is
 #: memoised now, so the same budget buys far more: raising the cap to 64 costs
 #: no measurable time on a 200-problem GSM8K sweep at N=128 and silences the
-#: warning on the 42%% of pools that sat between the two. Measured on that
-#: sweep, 24, 64 and 160 all return 66.0%% -- the cap was not costing accuracy
+#: warning on the 37%% of pools that sat between the two. Measured on that
+#: sweep, 24, 64 and 160 all return 66.5%% -- the cap was not costing accuracy
 #: on this data. That is a property of these pools, not a general guarantee,
 #: which is why analyse.py reports how often the cap fires.
 _MERGE_LIMIT = 64
@@ -209,6 +240,7 @@ def _merge_map(keys: Sequence[str]) -> Dict[str, str]:
     if len(distinct) < 2 or not have_math_verify():
         return rep
     if len(distinct) > _MERGE_LIMIT:
+        _MERGE_CAP_HITS[0] += 1
         # Merging is quadratic in distinct answers and each comparison invokes
         # a symbolic parser. Past this point the cost is worse than the benefit,
         # so fall back to exact matching rather than stall the caller.
@@ -262,12 +294,23 @@ def _tally(samples: List[Sample], weight_fn,
     """
     if merge is None:
         merge = _merge_map([s.key for s in samples if s.key])
-    weights: Dict[str, float] = defaultdict(float)
+
+    # Collect first, sum second. Accumulating with ``+=`` in list order makes
+    # the total depend on the order the samples arrived in, because float
+    # addition is not associative: two permutations of the same weights can
+    # differ in the last bit, which is enough to flip a near-tie in
+    # ``self_certainty`` or ``verifier``. math.fsum over a sorted list is
+    # exactly rounded and gives the same total for every permutation.
+    #
+    # ``majority`` is unaffected either way -- it sums 1.0 -- but it costs
+    # nothing to make the guarantee hold for all of them rather than for the
+    # default only.
+    grouped: Dict[str, List[float]] = defaultdict(list)
     for s in samples:
         k = s.key
         if k:
-            weights[merge.get(k, k)] += weight_fn(s)
-    return weights
+            grouped[merge.get(k, k)].append(weight_fn(s))
+    return {k: math.fsum(sorted(v)) for k, v in grouped.items()}
 
 
 def _winner(weights: Dict[str, float], samples: List[Sample],
@@ -372,7 +415,24 @@ def select(samples: Sequence, method: str = "majority",
         # Validate every score, not only the ones attached to a usable answer:
         # otherwise the same pool raises under 'verifier' and passes here.
         _check_scores(items)
-        return max(scored, key=lambda s: float(s.score)).key
+        # 'verifier' warns when every score is zero, because the weighted vote
+        # it would run is indistinguishable from an unweighted one. argmax has
+        # the same problem and used to say nothing: it returned a trajectory
+        # picked by tie-break, with no signal behind it at all.
+        if all(float(s.score) == 0.0 for s in scored):
+            warnings.warn(
+                "bestofn: every verifier score is zero, so 'verifier_argmax' "
+                "is choosing on the tie-break alone and the verifier is "
+                "contributing nothing. Check that it is wired up and that its "
+                "outputs are probabilities, not logits.",
+                RuntimeWarning, stacklevel=3,
+            )
+        # min on (-score, key), not max on score: max keeps the first
+        # maximal element, so an exact tie between two trajectories was
+        # resolved by whichever the model happened to emit first. Breaking on
+        # the canonical key instead makes this independent of pool order, the
+        # same way _winner does for the voting selectors.
+        return min(scored, key=lambda s: (-float(s.score), s.key)).key
 
     # Computed once and threaded through: it is quadratic in distinct answers
     # and each comparison runs a symbolic parser.

@@ -76,6 +76,9 @@ def load_problems(n_problems: int, seed: int):
     return out
 
 
+from bestofn import __version__ as _VERSION   # noqa: E402
+
+
 def record_for(k, item, res, engine):
     return {
         "i": k,
@@ -83,6 +86,19 @@ def record_for(k, item, res, engine):
         "question": item["question"],
         "gold": item["gold"],
         "prompt_suffix": engine.prompt_suffix,
+        # Recorded so the run can actually be regenerated. The module docstring
+        # claimed these were stored and they were not: only prompt_suffix was,
+        # which is not enough to reproduce a single trajectory.
+        "config": {
+            "model": engine.model_name,
+            "n": engine.n,
+            "temperature": engine.temperature,
+            "top_p": getattr(engine, "top_p", None),
+            "max_tokens": getattr(engine, "max_tokens", None),
+            "backend": engine.backend,
+            "logprobs": getattr(engine, "logprobs", None),
+            "bestofn_version": _VERSION,
+        },
         "trajectories": [
             {
                 "text": s.text,

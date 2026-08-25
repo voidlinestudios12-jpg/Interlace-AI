@@ -44,27 +44,23 @@ import warnings
 # truncated and malformed trajectories, and on some problems the distinct
 # answer count really does exceed the cap. Whether that moves the published
 # numbers is now measured rather than assumed.
-_MERGE_CAPPED = [0]
-_show_warning = warnings.showwarning
-
-
-def _count_merge_warnings(message, category, filename, lineno,
-                          file=None, line=None):
-    if "symbolic merge limit" in str(message):
-        _MERGE_CAPPED[0] += 1
-    else:
-        _show_warning(message, category, filename, lineno, file, line)
-
-
-warnings.showwarning = _count_merge_warnings
+# Silenced for output, counted at the source. Counting the *warnings* is
+# what the previous version did and it under-reported by 73x: Python's filter
+# shows a given warning once per location, so repeats never reach the handler.
+# bestofn.select keeps the real tally.
+warnings.filterwarnings("ignore", message=".*symbolic merge limit.*")
 
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from bestofn import Sample, coverage, normalise, select      # noqa: E402
+from bestofn.select import merge_cap_hits                    # noqa: E402
 from bestofn.extract import extract_boxed                    # noqa: E402
 
 CURVE = (1, 2, 4, 8, 16, 32, 64, 128)
+#: How many random seeds the paired significance test runs over. One seed
+#: gives a p-value that varies by orders of magnitude between runs.
+P_SEEDS = 200
 RESAMPLES = 200
 BOOTSTRAP = 2000
 SEED = 20260817
@@ -262,16 +258,43 @@ def main():
     print("\n" + "=" * 74)
     print("IS THE DIFFERENCE REAL?   exact McNemar on paired discordances")
     print("=" * 74)
-    full = [(select(s, "majority"), select(s, "random", seed=SEED),
-             normalise(g)) for s, g in zip(samples, golds)]
+    maj_pick = [select(s, "majority") for s in samples]
+    gold_key = [normalise(g) for g in golds]
+
+    # `random` is a different draw for every seed, so a p-value computed from
+    # one of them is a property of that seed as much as of the data. Running
+    # the comparison over many seeds and reporting the worst case says what
+    # the evidence actually supports; quoting a single seed's 3.2e-08 as
+    # though it were a fixed quantity does not.
+    trials = []
+    for sd in range(P_SEEDS):
+        rnd_pick = [select(s, "random", seed=sd) for s in samples]
+        a = sum(1 for m, r, g in zip(maj_pick, rnd_pick, gold_key)
+                if m == g and r != g)
+        b = sum(1 for m, r, g in zip(maj_pick, rnd_pick, gold_key)
+                if r == g and m != g)
+        trials.append((mcnemar_exact(a, b), a, b))
+    trials.sort()
+    p_worst, a_worst, b_worst = trials[-1]
+    p_med, a_med, b_med = trials[len(trials) // 2]
+    p_best = trials[0][0]
+
+    full = [(m, r, g) for m, r, g in
+            zip(maj_pick, [select(s, "random", seed=SEED) for s in samples],
+                gold_key)]
     maj_only = sum(1 for m, r, g in full if m == g and r != g)
     rnd_only = sum(1 for m, r, g in full if r == g and m != g)
     p = mcnemar_exact(maj_only, rnd_only)
-    print(f"\n  majority vs random, N={n_max}")
-    print(f"    majority right / random wrong : {maj_only}")
-    print(f"    random right / majority wrong : {rnd_only}")
-    print(f"    exact McNemar p               : {p:.4g}"
-          f"   {'significant' if p < 0.05 else 'NOT significant'}")
+
+    print(f"\n  majority vs random, N={n_max}, over {P_SEEDS} random seeds")
+    print(f"    median   : {a_med} vs {b_med} discordances, p = {p_med:.3g}")
+    print(f"    worst    : {a_worst} vs {b_worst} discordances, "
+          f"p = {p_worst:.3g}")
+    print(f"    best     : p = {p_best:.3g}")
+    print(f"    {'significant at every seed' if p_worst < 0.05 else 'NOT significant at some seed'}")
+    print(f"\n    The number to quote is the worst case, p = {p_worst:.3g}.")
+    print(f"    A single seed gave {p:.3g}; across seeds the value moves by")
+    print(f"    orders of magnitude while the conclusion does not.")
 
     # -------------------------------------------- every selector vs random
     print("\n" + "=" * 74)
@@ -280,13 +303,34 @@ def main():
     print("=" * 74 + "\n")
     rows = []
     for name in ("random", "majority", "self_certainty", "oracle"):
+        if name == "random":
+            # Averaged over seeds, not taken from one. A single seeded draw
+            # of `random` landed on 47.5% where the mean is 46.4% -- half a
+            # standard deviation out, and it was published beside the curve's
+            # own 46.3% as though the two were the same quantity.
+            per_seed = []
+            for sd in range(P_SEEDS):
+                pick = [select(sm, "random", seed=sd) for sm in samples]
+                per_seed.append(statistics.fmean(
+                    [1.0 if a == g else 0.0 for a, g in zip(pick, gold_key)]))
+            acc = 100 * statistics.fmean(per_seed)
+            sd_seeds = 100 * statistics.pstdev(per_seed)
+            hit = [1.0 if a == g else 0.0 for a, g in
+                   zip([select(sm, "random", seed=SEED) for sm in samples],
+                       gold_key)]
+            clo, chi = bootstrap_ci(hit)
+            rows.append({"selector": name, "accuracy": round(acc, 2),
+                         "ci95": [round(clo, 2), round(chi, 2)],
+                         "seeds": P_SEEDS, "sd_over_seeds": round(sd_seeds, 2)})
+            print("  %-16s %6.1f%%   95%% CI [%.1f, %.1f]   "
+                  "(mean of %d seeds, sd %.1f)"
+                  % (name, acc, clo, chi, P_SEEDS, sd_seeds))
+            continue
         if name == "oracle":
             got = [select(sm, "oracle", gold=g) for sm, g in zip(samples, golds)]
-        elif name == "random":
-            got = [select(sm, "random", seed=SEED) for sm in samples]
         else:
             got = [select(sm, name) for sm in samples]
-        hit = [1.0 if a == normalise(g) else 0.0 for a, g in zip(got, golds)]
+        hit = [1.0 if a == g else 0.0 for a, g in zip(got, gold_key)]
         acc = 100 * statistics.fmean(hit)
         clo, chi = bootstrap_ci(hit)
         rows.append({"selector": name, "accuracy": round(acc, 2),
@@ -310,21 +354,33 @@ def main():
             "per_trajectory_accuracy": round(100 * p_bar, 2),
             "abstention_rate": round(100 * (total - voting) / total, 2),
             "truncation_rate": round(100 * trunc / total, 2),
+            # Exact counts as well as rates. A figure that multiplies a
+            # rounded percentage back out lands a couple of trajectories away
+            # from the truth and then disagrees with the technical note.
+            "n_trajectories": total,
+            "n_voting": voting,
+            "n_abstained": total - voting,
+            "n_truncated": trunc,
+            "n_abstained_not_truncated": (total - voting) - trunc,
             "total_tokens": toks,
             "curve": curve,
             "mcnemar_majority_vs_random": {
+                "seeds": P_SEEDS,
+                "p_value_worst": float("%.4g" % p_worst),
+                "p_value_median": float("%.4g" % p_med),
+                "discordances_median": [a_med, b_med],
                 "majority_only": maj_only, "random_only": rnd_only,
-                # Not round(p, 6). This p-value is 5.65e-08, and rounding
+                # Not round(p, 6). This p-value is 3.24e-08, and rounding
                 # it to six decimal places publishes 0.0 -- which reads as
                 # "exactly zero" and is not the number we computed.
                 "p_value": float("%.4g" % p),
             },
             "selectors_at_n_max": rows,
-            "symbolic_merge_capped_calls": _MERGE_CAPPED[0],
+            "symbolic_merge_capped_calls": merge_cap_hits(),
             "reextraction_drift": drift,
         }, fh, indent=2)
     print("\n  select() calls that hit the symbolic-merge cap: %s"
-          % format(_MERGE_CAPPED[0], ","))
+          % format(merge_cap_hits(), ","))
     print(f"\n  summary written to {os.path.relpath(out, here)}")
     return 0
 

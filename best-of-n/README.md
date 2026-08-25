@@ -26,7 +26,8 @@ language:
 [![PyPI](https://img.shields.io/pypi/v/bestofn?color=blue)](https://pypi.org/project/bestofn/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21936832.svg)](https://doi.org/10.5281/zenodo.21936832)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-175%20passing-brightgreen)](tests/test_selectors.py)
+[![Tests](https://img.shields.io/badge/tests-177%20passing-brightgreen)](tests/test_selectors.py)
+[![Reproducible](https://img.shields.io/badge/every%20figure-reproducible%20in%202%20min-blueviolet)](results/)
 
 ```bash
 pip install bestofn
@@ -126,8 +127,12 @@ weights frozen. Every figure is recomputed from the published trajectories by
 
 **45.0% to 66.5%** on a half-billion-parameter model, with the weights frozen
 throughout. Against random selection at the same N, exact McNemar gives
-**p = 3.2 × 10⁻⁸** — majority wins on 44 problems where random loses, and loses
-on 6.
+**p ≤ 1.4 × 10⁻⁵**, and the median across 200 random seeds is 1.5 × 10⁻⁹.
+
+We quote the worst seed rather than the best. `random` draws a different
+trajectory every time you run it, so a p-value taken from one seed is partly a
+property of that seed: ours ranged from 2 × 10⁻¹⁴ to 1.4 × 10⁻⁵ depending on
+which one we picked. The conclusion holds at every one of them.
 
 And **coverage reaches 93.5%**: on more than nine problems out of ten, this
 small model does find the right answer somewhere in its 128 attempts. That is
@@ -161,7 +166,7 @@ the gain to the method.
 
 | selector at N=128 | accuracy | 95% CI |
 |---|---:|---:|
-| `random` | 47.5% | [40.5, 54.5] |
+| `random` (mean of 200 seeds, sd 2.5) | 46.3% | [41.0, 55.0] |
 | `majority` | **66.5%** | [60.5, 73.0] |
 | `self_certainty` | 66.5% | [60.5, 73.0] |
 | `oracle` (diagnostic ceiling) | 93.5% | [90.0, 96.5] |
@@ -171,7 +176,7 @@ the gain to the method.
 | | |
 |---|---|
 | Trajectories generated | 25,600 |
-| Cast a vote | 24,799 — 96.9% |
+| Cast a vote | 24,797 — 96.9% |
 | Truncated at the token limit | 216 — 0.8% |
 | Tokens generated | 8,434,157 |
 | Re-extraction drift on replay | **0** |
@@ -183,9 +188,11 @@ All 25,600 trajectories are published in full.
 
 ## It tells you what to do next
 
-This is the part no other library gives you. Beyond raising accuracy,
-Best-of-N **measures the two halves of the problem separately** and tells you
-which one you are actually facing:
+Beyond raising accuracy, Best-of-N **measures the two halves of the problem
+separately** and tells you which one you are actually facing. The framing is
+not ours — `pass@k` beside `maj@n` appears in the evaluation harnesses and in
+Snell et al. (2024). What is ours is that it takes one call, and that the
+answer arrives as a decision rather than as two numbers to interpret:
 
 ```python
 r = engine.solve(problem)
@@ -216,20 +223,34 @@ r.total_tokens    # what it cost
 
 ## The same pool always gives the same answer
 
-Selection here is **invariant under permutation of the trajectory pool**.
-Shuffle the samples and the returned answer does not move.
+Shuffle the trajectory pool and every selector returns the same answer.
+`random` is the exception, and only because picking at random is what it is
+for.
 
-That sounds like it should be free. It is not: symbolic equivalence is not
-transitive — a parser will accept `0.3333333333` against `1/3`, and `1/3`
+That sounds like it should be free. It is not, and it took three separate
+things to make true:
+
+**The equivalence classes cannot be built greedily.** Symbolic equivalence is
+not transitive — a parser accepts `0.3333333333` against `1/3`, and `1/3`
 against `0.33333333333333`, while rejecting the two decimals against each
-other. Group answers greedily and the classes you get depend on which one the
-model happened to emit first. We take the transitive closure instead, and break
-exact ties on the canonical key rather than on arrival order.
+other. Compare each new answer against one representative per class and the
+partition you get depends on which answer the model emitted first. We take the
+transitive closure over all pairs instead.
 
-You can see it in the published output: at N=128 the resampled curve is drawing
-128 trajectories from a pool of 128, so every draw is a permutation of the same
-pool, and the reported spread is **exactly zero**. A number that is only zero
-if the property holds.
+**Weights cannot be accumulated in arrival order.** Float addition is not
+associative, so two permutations of the same weights can differ in the last
+bit — enough to flip a near-tie in a verifier-weighted vote. Totals are summed
+with `math.fsum` over a sorted list, which is exactly rounded.
+
+**Ties cannot break on whichever came first.** Every tie, in every selector,
+resolves on the canonical key.
+
+We check it two ways. Directly: shuffling all 200 published pools eight times
+each moves **no** returned answer. And visibly, in the output — at N=128 the
+resampled curve draws 128 trajectories from a pool of 128, so every draw is a
+permutation of one pool and the reported spread is **0.00**. That second one is
+a necessary condition rather than a proof, which is why the shuffle test exists
+too.
 
 ---
 

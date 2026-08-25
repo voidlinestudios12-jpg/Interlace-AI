@@ -11,6 +11,7 @@ Copyright 2026 Alejandro Areces Rivera - Interlace AI. Apache License 2.0.
 import io
 import json
 import os
+import subprocess
 import sys
 
 import matplotlib
@@ -54,90 +55,6 @@ def save(fig, name):
     fig.savefig(out, dpi=200, bbox_inches="tight", pad_inches=0.3)
     plt.close(fig)
     print("  wrote figures/%s" % name)
-
-
-# --------------------------------------------------------------- 1. the curve
-
-def fig_curve(d):
-    c = d["curve"]
-    ns = [r["n"] for r in c]
-    maj = [r["majority"] for r in c]
-    rnd = [r["random"] for r in c]
-    cov = [r["coverage"] for r in c]
-    lo = [r["majority_ci95"][0] for r in c]
-    hi = [r["majority_ci95"][1] for r in c]
-
-    fig, ax = plt.subplots(figsize=(9, 5.6))
-    ax.fill_between(ns, lo, hi, color=ACCENT, alpha=0.11, linewidth=0)
-    ax.plot(ns, cov, "--", color=CEIL, lw=2.2, marker="o", ms=5,
-            label="Coverage — the answer is somewhere in the pool")
-    ax.plot(ns, maj, "-", color=ACCENT, lw=3.2, marker="o", ms=7,
-            label="Majority vote — what you get back", zorder=5)
-    ax.plot(ns, rnd, "-", color=BASE, lw=2, marker="s", ms=5,
-            label="Random pick — the baseline it has to beat")
-
-    ax.annotate("%.1f%%" % maj[-1], (ns[-1], maj[-1]),
-                textcoords="offset points", xytext=(10, -4),
-                fontsize=13, fontweight="bold", color=ACCENT)
-    ax.annotate("%.1f%%" % cov[-1], (ns[-1], cov[-1]),
-                textcoords="offset points", xytext=(10, -4),
-                fontsize=12, fontweight="bold", color=CEIL)
-    ax.annotate("%.1f%%" % maj[0], (ns[0], maj[0]),
-                textcoords="offset points", xytext=(4, -18),
-                fontsize=11, color=INK)
-
-    ax.set_xscale("log", base=2)
-    ax.set_xticks(ns)
-    ax.set_xticklabels([str(n) for n in ns])
-    ax.set_xlabel("N — samples drawn from the same frozen model")
-    ax.set_ylabel("GSM8K accuracy")
-    ax.yaxis.set_major_formatter(PCT)
-    ax.set_ylim(35, 100)
-    ax.grid(axis="y", color=GRID, lw=1)
-    ax.set_axisbelow(True)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13),
-              frameon=False, fontsize=10.5, ncol=3, columnspacing=1.6)
-    ax.set_title("One 0.5B model, asked more than once\n",
-                 fontsize=15, fontweight="bold", loc="left")
-    ax.text(0, 1.005, "Qwen2.5-0.5B-Instruct on GSM8K · weights frozen · "
-            "200 problems · shaded band is the 95% CI",
-            transform=ax.transAxes, fontsize=9.5, color="#5b636d")
-    save(fig, "07_curve_n128.png")
-
-
-# ------------------------------------------------------- 2. before and after
-
-def fig_bars(d):
-    c = d["curve"]
-    first, last = c[0], c[-1]
-    labels = ["Single sample\n(what you get today)",
-              "Best-of-%d\n(same model, same weights)" % last["n"]]
-    vals = [first["majority"], last["majority"]]
-
-    fig, ax = plt.subplots(figsize=(7.4, 5.4))
-    bars = ax.bar(labels, vals, width=0.52, color=[BASE, ACCENT], zorder=3)
-    for b, v in zip(bars, vals):
-        ax.text(b.get_x() + b.get_width() / 2, v + 1.4, "%.1f%%" % v,
-                ha="center", fontsize=17, fontweight="bold",
-                color=b.get_facecolor())
-
-    gain = vals[1] - vals[0]
-    ax.annotate("", xy=(1, vals[1] - 1), xytext=(1, vals[0] + 1),
-                arrowprops=dict(arrowstyle="<->", color=GOOD, lw=2.4))
-    ax.text(1.09, (vals[0] + vals[1]) / 2, "+%.1f\npoints" % gain,
-            color=GOOD, fontweight="bold", fontsize=14, va="center")
-
-    ax.set_ylabel("GSM8K accuracy")
-    ax.yaxis.set_major_formatter(PCT)
-    ax.set_ylim(0, max(vals) + 16)
-    ax.grid(axis="y", color=GRID, lw=1)
-    ax.set_axisbelow(True)
-    ax.set_title("Nothing was trained\n", fontsize=15,
-                 fontweight="bold", loc="left")
-    ax.text(0, 1.005, "The weights never changed. Only the number of "
-            "attempts did.", transform=ax.transAxes,
-            fontsize=9.5, color="#5b636d")
-    save(fig, "08_bars_n128.png")
 
 
 # ---------------------------------------------- 3. where the gain comes from
@@ -226,27 +143,41 @@ def fig_selectors(d):
 # ------------------------------------------------ 5. what the accounting says
 
 def fig_accounting(d):
+    total = d.get("n_trajectories", d["problems"] * d["n_generated"])
     voted = 100.0 - d["abstention_rate"]
+    n_abs = d.get("n_abstained")
+    n_tr = d.get("n_truncated")
+    n_un = d.get("n_abstained_not_truncated")
     fig, ax = plt.subplots(figsize=(8.6, 2.6))
     ax.barh([0], [voted], color=GOOD, height=0.42, zorder=3)
     ax.barh([0], [d["abstention_rate"]], left=[voted], color="#e4b363",
             height=0.42, zorder=3)
     ax.text(voted / 2, 0, "%.1f%% cast a vote" % voted, ha="center",
             va="center", color="white", fontweight="bold", fontsize=12)
-    ax.text(voted + d["abstention_rate"] / 2, 0.62,
-            "%.1f%% abstained" % d["abstention_rate"], ha="center",
-            fontsize=10, color=INK)
+    ax.annotate("%.1f%% abstained" % d["abstention_rate"],
+                xy=(voted + d["abstention_rate"] / 2, 0.21),
+                xytext=(voted + d["abstention_rate"] / 2 + 1.5, 0.95),
+                ha="left", fontsize=10, color=INK,
+                arrowprops=dict(arrowstyle="-", color="#b9c0c8", lw=1))
     ax.set_yticks([])
     ax.set_xlim(0, 100)
+    ax.set_ylim(-0.6, 1.3)
     ax.xaxis.set_major_formatter(PCT)
     ax.grid(axis="x", color=GRID, lw=1)
     ax.set_axisbelow(True)
     ax.set_title("A trajectory with no answer does not get a vote\n",
                  fontsize=14, fontweight="bold", loc="left")
-    ax.text(0, 1.06, "%s trajectories. Guessing at the last number in an "
-            "unfinished one would have added %s phantom ballots."
-            % ("{:,}".format(25600),
-               "{:,}".format(int(round(25600 * d["abstention_rate"] / 100)))),
+    # Not all abstentions are truncations. The chart used to imply they were,
+    # and attributed every one of them to an unfinished trajectory.
+    ax.text(0, 1.10,
+            "%s trajectories. %s abstained: %s ran out of tokens and %s "
+            "finished without boxing an answer."
+            % ("{:,}".format(total), "{:,}".format(n_abs),
+               "{:,}".format(n_tr), "{:,}".format(n_un)),
+            transform=ax.transAxes, fontsize=9.5, color="#5b636d")
+    ax.text(0, 1.02,
+            "Every one of them would have cast a phantom ballot under a "
+            "\u201clast number in the text\u201d fallback.",
             transform=ax.transAxes, fontsize=9.5, color="#5b636d")
     save(fig, "11_abstention.png")
 
@@ -286,10 +217,27 @@ def fig_headroom(d):
 
 
 def main():
+    """Regenerate every published figure.
+
+    07 and 08 are the two the model card leads with and they carry the brand
+    header, so they are produced by plot_curva.py and plot_bars.py. Those two
+    scripts and the functions in this module used to write the same filenames,
+    which meant the last one run decided what shipped -- and for one release
+    the pair that won were carrying hand-typed numbers from a previous version.
+    One entry point, one owner per file.
+    """
     d = load()
     print("regenerating figures from results/gsm8k_summary.json")
-    fig_curve(d)
-    fig_bars(d)
+
+    for script in ("plot_curva.py", "plot_bars.py"):
+        path = os.path.join(HERE, script)
+        r = subprocess.run([sys.executable, path], cwd=HERE,
+                           capture_output=True, text=True)
+        if r.returncode:
+            print(r.stdout + r.stderr)
+            return r.returncode
+        print("  " + r.stdout.strip())
+
     fig_decomposition(d)
     fig_selectors(d)
     fig_accounting(d)

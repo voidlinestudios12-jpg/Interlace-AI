@@ -184,7 +184,7 @@ class BestOfN:
         max_parallel: Optional[int] = None,
         **backend_kwargs,
     ):
-        _check_sampling(n, temperature)
+        _check_sampling(n, temperature, top_p, max_tokens, max_parallel)
         # Without math-verify, equivalent answers written differently vote as
         # separate blocs and the merge is a no-op. That degrades quietly -- the
         # run still finishes and still reports a number -- so say it out loud
@@ -440,8 +440,14 @@ class BestOfN:
     def _mean_logprobs(self, out, gen, eos) -> List[Optional[float]]:
         """Mean log-probability of each generated continuation.
 
-        Reduced in blocks of decoding steps, so the full ``[k, T, V]`` tensor
-        is never materialised and memory stays flat in ``max_tokens``.
+        Reduced in blocks of decoding steps, so no ``[k, T, V]`` ``log_softmax``
+        copy is ever materialised — only one ``[k, block, V]`` slice at a time.
+
+        Note what this does **not** claim. ``generate(output_logits=True)``
+        already retains one ``[k, V]`` tensor per decoding step before this
+        function is ever called, so the raw logits still grow linearly in
+        ``max_tokens`` and :meth:`_chunk_size` has to budget for them. What is
+        avoided here is doubling that peak with a second full-size tensor.
         """
         import torch
 
@@ -558,23 +564,27 @@ class BestOfN:
         if callable(batch):
             try:
                 scores = list(batch(problem, list(texts)))
-                if len(scores) != len(texts):
-                    # The caller zips scores against samples. A short list
-                    # would silently drop the tail of the pool -- the vote
-                    # would run, return a plausible answer, and never say that
-                    # it ignored trajectories. Refuse instead.
-                    raise ValueError(
-                        f"score_batch returned {len(scores)} scores for "
-                        f"{len(texts)} trajectories; they must correspond "
-                        f"one-to-one and in order."
-                    )
-                return scores
             except Exception as exc:
                 warnings.warn(
                     f"bestofn: batched scoring failed ({type(exc).__name__}: "
                     f"{exc}); falling back to one call per trajectory.",
                     RuntimeWarning, stacklevel=3,
                 )
+            else:
+                # Deliberately outside the try. Raised inside it, this check
+                # was caught by the handler directly above and reported as
+                # "batched scoring failed" -- which it had not; it had returned
+                # the wrong number of scores. The pool was then silently
+                # rescored through a different code path that can return
+                # different values. The caller zips these against the samples,
+                # so a short list drops the tail of the pool without saying so.
+                if len(scores) != len(texts):
+                    raise ValueError(
+                        f"score_batch returned {len(scores)} scores for "
+                        f"{len(texts)} trajectories; they must correspond "
+                        f"one-to-one and in order."
+                    )
+                return scores
         return [self.verifier(problem, t) for t in texts]
 
     def __repr__(self) -> str:  # pragma: no cover
@@ -598,6 +608,19 @@ def _eos_logprob(o) -> float:
     lps = getattr(o, "logprobs", None)
     if not lps:
         return 0.0
+    if len(lps) != len(o.token_ids):
+        # The last log-probability cannot be lined up with the last token, so
+        # the EOS term cannot be removed. Say so rather than silently
+        # returning a mean that divides an EOS-inclusive sum by an
+        # EOS-exclusive count -- the exact defect this function exists to fix.
+        warnings.warn(
+            f"bestofn: vLLM returned {len(lps)} log-probability entries for "
+            f"{len(o.token_ids)} tokens, so the terminal-token correction was "
+            f"skipped; this trajectory's mean log-probability is biased by "
+            f"roughly one token in {max(1, len(o.token_ids))}.",
+            RuntimeWarning, stacklevel=3,
+        )
+        return 0.0
     try:
         last = lps[-1]
         entry = last[o.token_ids[-1]]
@@ -606,10 +629,30 @@ def _eos_logprob(o) -> float:
         return 0.0
 
 
-def _check_sampling(n: int, temperature: float) -> None:
-    """Validate the two parameters that make Best-of-N meaningful."""
+def _check_sampling(n, temperature, top_p=1.0, max_tokens=1,
+                    max_parallel=None) -> None:
+    """Validate the sampling parameters.
+
+    Every one of these used to be accepted here and then fail somewhere inside
+    a backend, several frames from the mistake, where the user reasonably
+    blames the backend. ``top_p=0`` silences the model, ``max_tokens=0``
+    returns empty strings that all abstain, a float ``n`` fails on a later
+    ``range()``, and ``max_parallel=0`` quietly meant "auto" rather than being
+    the error it looks like.
+    """
+    if isinstance(n, bool) or int(n) != n:
+        raise ValueError(f"n must be a whole number, got {n!r}")
     if n < 1:
         raise ValueError("n must be >= 1")
+    if not 0 < top_p <= 1:
+        raise ValueError(f"top_p must be in (0, 1], got {top_p!r}")
+    if int(max_tokens) != max_tokens or max_tokens < 1:
+        raise ValueError(
+            f"max_tokens must be a positive whole number, got {max_tokens!r}")
+    if max_parallel is not None and (int(max_parallel) != max_parallel
+                                     or max_parallel < 1):
+        raise ValueError(
+            f"max_parallel must be None (auto) or >= 1, got {max_parallel!r}")
     if temperature <= 0 and n > 1:
         raise ValueError(
             "temperature must be > 0 for Best-of-N: at temperature 0 all "

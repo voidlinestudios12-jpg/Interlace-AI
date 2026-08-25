@@ -120,6 +120,12 @@ _UNRESOLVED = re.compile(r"\\(?:[dt]?frac|sqrt)|(?:frac|sqrt)(?=[^(a-zA-Z]|$)")
 
 _MAX_NESTING = 24
 
+#: A LaTeX command still present after every rewrite above has run. It cannot
+#: be canonicalised, and stripping the backslash produces a plausible-looking
+#: wrong answer rather than a missing one, so the extractor abstains instead.
+#: ``\begin``/``\end`` are caught by the same rule.
+_LEFTOVER_COMMAND = re.compile(r"\\[A-Za-z]")
+
 
 def _is_unit(content: str) -> bool:
     """Whether a ``\\text{...}`` group is a unit rather than the answer."""
@@ -183,14 +189,30 @@ def _latex_to_text(s: str) -> Optional[str]:
     if re.search(r"\\[dt]?frac|\\sqrt", s):
         return None                     # too deeply nested; abstain
 
+    # Degrees are a unit, like the "km" in "204 km", and the whole construct
+    # has to go before the exponent rule sees it. Left to that rule,
+    # "45^{\circ}" becomes "45**(\circ)" and then "45**()", which is not a
+    # number; dropping only the marker leaves "90^", which no longer compares
+    # equal to a gold of "90".
+    s = re.sub(r"\^\s*\{\s*\\(?:circ|degree)\s*\}", "", s)
+    s = re.sub(r"\^\s*\\(?:circ|degree)", "", s)
+    s = re.sub(r"\\(?:circ|degree)", "", s)
+
     s = re.sub(r"\^\s*\{([^{}]*)\}", r"**(\1)", s)
     s = re.sub(r"\^(-?\w)", r"**\1", s)
     s = re.sub(r"_\s*\{([^{}]*)\}", r"_\1", s)
 
-    for name in ("pi", "theta", "alpha", "beta", "gamma", "phi", "lambda",
-                 "mu", "sigma", "omega", "infty", "cdot", "times", "div"):
-        s = s.replace("\\" + name, {"cdot": "*", "times": "*", "div": "/",
-                                    "infty": "inf"}.get(name, name))
+    # Commands with an unambiguous plain form. Order matters: "geq" has to be
+    # tried before "ge", or the shorter name eats the start of the longer one.
+    for name, plain in (
+            ("geq", ">="), ("leq", "<="), ("neq", "!="), ("ge", ">="),
+            ("le", "<="), ("ne", "!="), ("pm", "+-"), ("circ", ""),
+            ("degree", ""), ("cdot", "*"), ("times", "*"), ("div", "/"),
+            ("infty", "inf"), ("pi", "pi"), ("theta", "theta"),
+            ("alpha", "alpha"), ("beta", "beta"), ("gamma", "gamma"),
+            ("phi", "phi"), ("lambda", "lambda"), ("mu", "mu"),
+            ("sigma", "sigma"), ("omega", "omega")):
+        s = s.replace("\\" + name, plain)
 
     for tok in _LATEX_NOISE:
         s = s.replace(tok, "")
@@ -198,6 +220,19 @@ def _latex_to_text(s: str) -> Optional[str]:
     # Set braces are part of the answer: {1,2,3} is not (1,2,3), and {1} is not
     # 1. Protect them before the grouping braces go.
     s = s.replace("\\{", _LB).replace("\\}", _RB)
+
+    # Anything still carrying a backslash is a command this module cannot
+    # resolve. Deleting the backslash and the braces -- which is what happened
+    # until now -- turns "\binom{5}{2}", which is 10, into the vote
+    # "binom52", and "\begin{pmatrix}1\\2\end{pmatrix}" into a run of digits.
+    # That is exactly the fabricated-answer failure rule 1 in the module
+    # docstring promises not to commit, and the promise was only being kept
+    # for \frac and \sqrt. Abstaining costs a vote; guessing corrupts the
+    # tally, and a fabricated number can match another problem's reference by
+    # accident.
+    if _LEFTOVER_COMMAND.search(s):
+        return None
+
     s = s.replace("\\", "").replace("{", "").replace("}", "")
     s = s.replace(_LB, "{").replace(_RB, "}")
     s = re.sub(r"\s+", "", s)
@@ -450,6 +485,13 @@ def normalise(answer: str) -> str:
 
     s = _strip_thousands(s)
 
+    # float() overflows to inf past about 1e308 and _numeric_key rejects
+    # non-finite values, so a 400-digit integer normalised to "" and abstained
+    # on an answer that was perfectly well formed. Digits are already exact.
+    digits = s[1:] if s[:1] == "-" else s
+    if digits.isdigit():
+        return str(int(s))
+
     key = _numeric_key(s)
     if key is not None:
         return key
@@ -499,8 +541,21 @@ def _equivalent_uncached(a: str, b: str) -> bool:
         if not pa or not pb:            # nothing recognisable to compare
             return False
         return bool(verify(pa, pb, timeout_seconds=None))
+    except _TransientVerifyError:       # never memoise a transient fault
+        raise
     except Exception:                   # a malformed answer is simply not equal
         return False
+
+
+class _TransientVerifyError(Exception):
+    """A symbolic-backend fault that says nothing about the two answers.
+
+    Kept distinct from a malformed answer so the memoising wrapper below never
+    records "not equal" for the life of the process on the strength of one
+    transient failure. Nothing raises it today; it exists so that marking a
+    recoverable failure class is a one-line change rather than an argument
+    about cache correctness.
+    """
 
 
 @functools.lru_cache(maxsize=100_000)

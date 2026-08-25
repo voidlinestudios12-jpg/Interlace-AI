@@ -113,13 +113,21 @@ Measure your own `p` first — it is the mean correctness across trajectories,
 and it is also exactly what random selection gets you:
 
 ```python
+from bestofn import normalise
+
 results = engine.solve_batch(problems, n=16)
-p = sum(s.answer == g for r, g in zip(results, golds) for s in r.samples) \
+p = sum(normalise(s.answer) == normalise(g)
+        for r, g in zip(results, golds) for s in r.samples) \
     / sum(r.n for r in results)
 ```
 
-**Do not use `n=2`.** With two trajectories there is no majority to speak of and
-ties break arbitrarily; it costs twice as much as one sample and reliably gains
+Note the `normalise` on both sides. Comparing `s.answer == g` directly reads
+0.44 on our own published data where the library reads 0.45, because a
+trajectory that wrote `1,000` or `204.0` is scored wrong against a gold of
+`1000` or `204`.
+
+**There is little point in `n=2`.** With two trajectories there is no majority
+to speak of, so it costs twice as much as one sample and gains
 nothing. Start at 8.
 
 ---

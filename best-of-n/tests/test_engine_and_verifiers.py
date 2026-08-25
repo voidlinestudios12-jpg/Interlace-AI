@@ -4,7 +4,10 @@ Run: python tests/test_engine_and_verifiers.py
 
 The 1.1.0 audit found that `_merge_map`, the engine and the verifier adapters
 had no coverage at all -- which is exactly where its three worst findings were.
-This file closes that gap. No GPU, no model download, no network.
+This file closes that gap. No GPU and no model download. Two checks do reach the Hugging Face API --
+`from_hub` and `license_of` query it by design, and stubbing that out would
+test the stub rather than the adapter -- so they are skipped when
+BESTOFN_TEST_OFFLINE is set.
 """
 import math
 import os

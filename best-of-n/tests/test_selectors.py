@@ -253,17 +253,32 @@ for _cmd in ("frac{1}{2}", "sqrt{2}", "pi", "dfrac{3}{4}"):
 
 check("normalise still folds plain text", normalise("abc"), "ABC")
 check("normalise still folds variables", normalise("x=5"), "X=5")
-check("LaTeX and decimal still merge",
-      len(_partition(["\\" + "frac{1}{2}", "0.5"])), 1)
+# Symbolic equivalence is what merges "\\frac{1}{2}" with "0.5" and what
+# makes the mixed-number form compare equal to a decimal. Without math-verify
+# these cannot pass, and asserting them anyway turned a default
+# `pip install bestofn` into a red test suite.
+from bestofn.extract import have_math_verify   # noqa: E402
+_SKIPPED = 0
+
+if have_math_verify():
+    check("LaTeX and decimal still merge",
+          len(_partition(["\\frac{1}{2}", "0.5"])), 1)
+else:
+    _SKIPPED += 1
 
 # --- M7: say so when the symbolic layer is absent --------------------------
-# Several checks above are vacuous without math-verify: equivalent() falls
-# back to string comparison and the merge tests pass by never merging.
-from bestofn.extract import have_math_verify   # noqa: E402
+# A bare print is swallowed by pytest, so the previous version of this notice
+# was invisible in exactly the run that needed it. Go through warnings, which
+# pytest collects and displays in its summary.
 if not have_math_verify():
-    print("\n  WARNING: math-verify is not installed. The symbolic-equivalence")
-    print("  checks above passed without exercising the symbolic path.")
-    print("  Install it with:  pip install math-verify")
+    import warnings as _w                       # noqa: E402
+    _w.warn(
+        "math-verify is not installed, so %d symbolic-equivalence checks were "
+        "skipped and the remaining ones did not exercise the symbolic path. "
+        "Install with: pip install \"bestofn[math]\"" % _SKIPPED,
+        RuntimeWarning, stacklevel=2)
+    print("\n  NOTE: %d checks skipped (math-verify not installed)." % _SKIPPED)
+    print('  Install with:  pip install "bestofn[math]"')
 
 
 # --- M5: a mixed number is a sum, not a product ----------------------------
@@ -273,16 +288,29 @@ if not have_math_verify():
 # other problem's reference by accident.
 from bestofn.extract import extract_boxed, equivalent   # noqa: E402
 
-check("mixed number is two and a half, not one",
-      equivalent(extract_boxed("\\boxed" + "{2" + "\\frac" + "{1}{2}}"), "2.5"), True)
-check("mixed number is not the product",
-      equivalent(extract_boxed("\\boxed" + "{2" + "\\frac" + "{1}{2}}"), "1"), False)
+_BOX = "\\boxed"
+_FRAC = "\\frac"
+
+# These two hold with or without the symbolic layer: they are about what the
+# extractor emits, not about what compares equal to it.
+check("mixed number extracts as a sum, not a product",
+      extract_boxed(_BOX + "{2" + _FRAC + "{1}{2}}"), "(2+1/2)")
 check("negative mixed number negates the whole thing",
-      equivalent(extract_boxed("\\boxed" + "{-3" + "\\frac" + "{1}{3}}"), "-10/3"), True)
-check("negative mixed number is not -3 + 1/3",
-      equivalent(extract_boxed("\\boxed" + "{-3" + "\\frac" + "{1}{3}}"), "-8/3"), False)
-check("a plain fraction is left alone",
-      equivalent(extract_boxed("\\boxed" + "{" + "\\frac" + "{5}{2}}"), "2.5"), True)
+      extract_boxed(_BOX + "{-3" + _FRAC + "{1}{3}}"), "-(3+1/3)")
+
+if have_math_verify():
+    check("mixed number equals two and a half",
+          equivalent(extract_boxed(_BOX + "{2" + _FRAC + "{1}{2}}"), "2.5"), True)
+    check("mixed number is not the product",
+          equivalent(extract_boxed(_BOX + "{2" + _FRAC + "{1}{2}}"), "1"), False)
+    check("negative mixed number equals -10/3",
+          equivalent(extract_boxed(_BOX + "{-3" + _FRAC + "{1}{3}}"), "-10/3"), True)
+    check("negative mixed number is not -8/3",
+          equivalent(extract_boxed(_BOX + "{-3" + _FRAC + "{1}{3}}"), "-8/3"), False)
+    check("a plain fraction is left alone",
+          equivalent(extract_boxed(_BOX + "{" + _FRAC + "{5}{2}}"), "2.5"), True)
+else:
+    _SKIPPED += 5
 
 print(f"\n{'='*46}\n{passed} passed, {failed} failed\n{'='*46}")
 if __name__ == "__main__":
