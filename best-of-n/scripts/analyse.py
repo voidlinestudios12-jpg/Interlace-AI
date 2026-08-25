@@ -31,6 +31,12 @@ import os
 import random
 import statistics
 import sys
+import warnings
+
+# The symbolic-merge cap fires once per select() call at large N. It is
+# expected here -- GSM8K answers are plain integers, so merging has nothing to
+# do -- and printing it 300,000 times would bury the results.
+warnings.filterwarnings("ignore", message=".*symbolic merge limit.*")
 
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -38,8 +44,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from bestofn import Sample, coverage, normalise, select      # noqa: E402
 from bestofn.extract import extract_boxed                    # noqa: E402
 
-CURVE = (1, 2, 4, 8, 16)
-RESAMPLES = 500
+CURVE = (1, 2, 4, 8, 16, 32, 64, 128)
+RESAMPLES = 200
 BOOTSTRAP = 2000
 SEED = 20260817
 

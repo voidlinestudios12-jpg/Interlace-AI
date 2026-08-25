@@ -1,70 +1,103 @@
 {
   "problems": 200,
-  "n_generated": 16,
-  "per_trajectory_accuracy": 36.22,
-  "abstention_rate": 28.72,
-  "truncation_rate": 24.0,
-  "total_tokens": 985545,
+  "n_generated": 128,
+  "per_trajectory_accuracy": 41.86,
+  "abstention_rate": 21.94,
+  "truncation_rate": 20.78,
+  "total_tokens": 7773981,
   "curve": [
     {
       "n": 1,
-      "random": 36.07,
-      "majority": 36.07,
-      "coverage": 36.07,
-      "sd": 2.288,
+      "random": 41.77,
+      "majority": 41.77,
+      "coverage": 41.8,
+      "sd": 2.227,
       "majority_ci95": [
-        31.0,
-        44.0
+        39.5,
+        53.0
       ]
     },
     {
       "n": 2,
-      "random": 40.43,
-      "majority": 40.59,
-      "coverage": 47.21,
-      "sd": 2.296,
+      "random": 45.05,
+      "majority": 44.95,
+      "coverage": 52.65,
+      "sd": 2.187,
       "majority_ci95": [
-        30.5,
-        44.0
+        40.0,
+        53.5
       ]
     },
     {
       "n": 4,
-      "random": 42.43,
-      "majority": 47.08,
-      "coverage": 57.26,
-      "sd": 1.966,
+      "random": 46.3,
+      "majority": 51.57,
+      "coverage": 62.16,
+      "sd": 1.972,
       "majority_ci95": [
-        39.0,
-        52.5
+        45.0,
+        59.0
       ]
     },
     {
       "n": 8,
-      "random": 43.21,
-      "majority": 52.84,
-      "coverage": 66.79,
-      "sd": 1.63,
-      "majority_ci95": [
-        48.5,
-        62.0
-      ]
-    },
-    {
-      "n": 16,
-      "random": 43.46,
-      "majority": 54.78,
-      "coverage": 74.5,
-      "sd": 0.751,
+      "random": 46.7,
+      "majority": 56.54,
+      "coverage": 70.47,
+      "sd": 1.758,
       "majority_ci95": [
         49.0,
         62.5
       ]
+    },
+    {
+      "n": 16,
+      "random": 46.92,
+      "majority": 59.89,
+      "coverage": 77.59,
+      "sd": 1.639,
+      "majority_ci95": [
+        52.0,
+        66.0
+      ]
+    },
+    {
+      "n": 32,
+      "random": 46.61,
+      "majority": 62.09,
+      "coverage": 83.19,
+      "sd": 1.318,
+      "majority_ci95": [
+        57.0,
+        70.0
+      ]
+    },
+    {
+      "n": 64,
+      "random": 46.66,
+      "majority": 63.93,
+      "coverage": 87.79,
+      "sd": 1.001,
+      "majority_ci95": [
+        55.5,
+        68.5
+      ]
+    },
+    {
+      "n": 128,
+      "random": 46.87,
+      "majority": 65.0,
+      "coverage": 91.0,
+      "sd": 0.0,
+      "majority_ci95": [
+        58.5,
+        71.5
+      ]
     }
   ],
   "mcnemar_majority_vs_random": {
-    "majority_only": 32,
-    "random_only": 3,
+    "majority_only": 38,
+    "random_only": 4,
     "p_value": 0.0
   },
   "reextraction_drift": 0

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """Best-of-N on GSM8K, publishing everything needed to re-derive the numbers.
 
-What makes this different from the 1.0.0 evaluation, and the reason it exists:
-the file it writes contains the **full reasoning text** of every trajectory,
-not the answer somebody already extracted from it. That is the difference
-between a replay script that can catch an extraction bug and one that cannot.
+What makes this different from a summary table, and the reason it exists: the
+file it writes contains the **full reasoning text** of every trajectory, not
+the answer somebody already extracted from it. That is the difference between a
+replay that can catch an extraction bug and one that cannot.
 
 Each record carries, per trajectory:
 
@@ -18,6 +18,9 @@ plus the prompt, the sampling parameters, the seed and the library version, so
 the run is reproducible rather than merely reported.
 
 Resumable: interrupt it and run it again.
+
+    python scripts/run_gsm8k.py                        # local, transformers
+    python scripts/run_gsm8k.py --backend vllm --n 128 --batch 25
 
 Copyright 2026 Alejandro Areces Rivera - Interlace AI. Apache License 2.0.
 """
@@ -70,12 +73,41 @@ def load_problems(n_problems: int, seed: int):
     return out
 
 
+def record_for(k, item, res, engine):
+    return {
+        "i": k,
+        "gsm8k_id": item["id"],
+        "question": item["question"],
+        "gold": item["gold"],
+        "prompt_suffix": engine.prompt_suffix,
+        "trajectories": [
+            {
+                "text": s.text,
+                "answer": s.answer,
+                "finish_reason": s.finish_reason,
+                "logprob": s.logprob,
+                "n_tokens": s.n_tokens,
+            }
+            for s in res.samples
+        ],
+    }
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     for key, val in DEFAULTS.items():
         ap.add_argument(f"--{key}", type=type(val), default=val)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--problems-file", default=None,
+                    help="JSON list of {id, question, gold}; skips the "
+                         "dataset download, which is useful on a machine with "
+                         "flaky access to the Hub")
     ap.add_argument("--no-logprobs", action="store_true")
+    ap.add_argument("--backend", default="auto",
+                    choices=["auto", "vllm", "transformers"])
+    ap.add_argument("--batch", type=int, default=1,
+                    help="problems per generation call; vLLM is much faster "
+                         "with a large batch, transformers is not")
     args = ap.parse_args()
 
     out_path = args.out or os.path.join(
@@ -94,10 +126,15 @@ def main():
     print(f"  max_tokens   : {args.max_tokens}")
     print(f"  temperature  : {args.temperature}   top_p: {args.top_p}")
     print(f"  seed         : {args.seed}")
+    print(f"  backend      : {args.backend}   batch: {args.batch}")
     print(f"  logprobs     : {not args.no_logprobs}")
     print("=" * 70, flush=True)
 
-    problems = load_problems(args.problems, args.seed)
+    if args.problems_file:
+        with io.open(args.problems_file, encoding="utf-8") as fh:
+            problems = json.load(fh)[:args.problems]
+    else:
+        problems = load_problems(args.problems, args.seed)
     print(f"\n  loaded {len(problems)} problems\n", flush=True)
 
     done = 0
@@ -111,42 +148,26 @@ def main():
     engine = BestOfN(
         args.model, n=args.n, temperature=args.temperature, top_p=args.top_p,
         max_tokens=args.max_tokens, extractor="boxed",
-        logprobs=not args.no_logprobs, backend="transformers",
+        logprobs=not args.no_logprobs, backend=args.backend,
     )
 
     started = time.time()
+    pending = problems[done:]
     with io.open(out_path, "a", encoding="utf-8") as fh:
-        for k, item in enumerate(problems, 1):
-            if k <= done:
-                continue
-            res = engine.solve(item["question"])
-            record = {
-                "i": k,
-                "gsm8k_id": item["id"],
-                "question": item["question"],
-                "gold": item["gold"],
-                "prompt_suffix": engine.prompt_suffix,
-                "trajectories": [
-                    {
-                        "text": s.text,
-                        "answer": s.answer,
-                        "finish_reason": s.finish_reason,
-                        "logprob": s.logprob,
-                        "n_tokens": s.n_tokens,
-                    }
-                    for s in res.samples
-                ],
-            }
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        for start in range(0, len(pending), args.batch):
+            group = pending[start:start + args.batch]
+            results = engine.solve_batch([g["question"] for g in group])
+
+            for offset, (item, res) in enumerate(zip(group, results)):
+                k = done + start + offset + 1
+                fh.write(json.dumps(record_for(k, item, res, engine),
+                                    ensure_ascii=False) + "\n")
             fh.flush()
 
-            if k % 10 == 0 or k == len(problems):
-                elapsed = time.time() - started
-                rate = elapsed / max(1, k - done)
-                print(f"  {k:>3}/{len(problems)}  "
-                      f"{rate:.0f}s/problem  "
-                      f"~{rate * (len(problems) - k) / 60:.0f} min left",
-                      flush=True)
+            k = done + start + len(group)
+            rate = (time.time() - started) / max(1, k - done)
+            print(f"  {k:>4}/{len(problems)}  {rate:.1f}s/problem  "
+                  f"~{rate * (len(problems) - k) / 60:.0f} min left", flush=True)
 
     print(f"\n  finished in {(time.time() - started) / 60:.1f} min")
     print(f"  written to {out_path}")

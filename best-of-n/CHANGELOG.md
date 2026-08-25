@@ -58,6 +58,14 @@ and adds the test coverage whose absence let them through.
   in 1.1.0, which is where all three of the audit's worst findings were.
 - Per-N confidence intervals in `scripts/analyse.py`.
 
+### Measurements
+
+- **Re-run at N=128** on the same 200 GSM8K problems, on an RTX 3090 through
+  the **vLLM backend** (which this release therefore exercises end to end):
+  41.8% at a single sample to **65.0%** with majority voting, coverage **91.0%**,
+  exact McNemar against random `p = 5.7e-08`. All 25,600 trajectories are
+  published in full.
+
 ### Changed
 
 - **The published accuracy curve now goes through `select()`** rather than
