@@ -55,7 +55,32 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from bestofn import Sample, coverage, normalise, select      # noqa: E402
 from bestofn.extract import equivalent                       # noqa: E402
-from bestofn.select import merge_cap_hits                    # noqa: E402
+from bestofn.select import merge_calls, merge_cap_hits       # noqa: E402
+
+
+def exact_coverage(samples, golds, k: int) -> float:
+    """Closed-form pass@k: the chance that k of the pool contains a hit.
+
+    ``1 - C(n-c, k) / C(n, k)`` where ``c`` of the ``n`` trajectories are
+    correct -- the unbiased estimator from Chen et al. (2021), standard since
+    Codex. Resampling it 200 times instead cost up to 0.20 points of avoidable
+    noise on the published curve.
+
+    This release argues, at length, for computing a baseline rather than
+    estimating it. That argument was applied to ``random`` and not to
+    coverage, which is the other headline number and the one the 27-point gap
+    is measured from.
+    """
+    total = 0.0
+    for pool, g in zip(samples, golds):
+        n = len(pool)
+        if k > n:
+            continue
+        c = sum(1 for x in pool if hit(x.key, g))
+        # P(no hit among k drawn without replacement) = C(n-c, k) / C(n, k)
+        total += 1.0 - (math.comb(n - c, k) / math.comb(n, k)
+                        if n - c >= k else 0.0)
+    return 100.0 * total / len(golds)
 
 
 def exact_random(samples, golds) -> float:
@@ -188,11 +213,23 @@ def rebuild(row):
 
 def main():
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
+    argv = [a for a in sys.argv[1:] if not a.startswith("--")]
+    flags = [a for a in sys.argv[1:] if a.startswith("--")]
+    args_out = None
+    for f in flags:
+        if f.startswith("--out="):
+            args_out = f.split("=", 1)[1]
+    path = argv[0] if argv else os.path.join(
         here, "results", "gsm8k_trajectories.jsonl")
     if not os.path.exists(path):
         print(f"not found: {path}\nRun scripts/run_gsm8k.py first.")
         return 1
+
+    # Zero both counters: they are process-global, so anything imported or
+    # run before this point would otherwise be folded into the published
+    # figure.
+    merge_cap_hits(reset=True)
+    merge_calls(reset=True)
 
     rows = load(path)
     problems = [rebuild(r) for r in rows]
@@ -261,11 +298,17 @@ def main():
             # the headline decomposition -- the 45.0-to-45.1 movement between
             # two releases was inside it.
             e = round(100 * p_bar, 2)
-            one1 = [1.0 if any(hit(x.key, g) for x in s[:1]) else 0.0
-                    for s, g in zip(samples, golds)]
-            lo1, hi1 = bootstrap_ci([1.0 if hit(x.key, g) else 0.0
-                                     for s, g in zip(samples, golds)
-                                     for x in s])
+            # Bootstrapped over PROBLEMS, like every other row in this
+            # table. Resampling the 25,600 trajectories as if they were
+            # independent ignores the 128-way clustering inside each problem
+            # and gave [44.7, 45.9] -- a design effect of 70, an interval 8.5
+            # times too narrow, and printed directly beneath rows whose
+            # intervals mean something different. The baseline of the whole
+            # +21.2 headline is not the place for the tightest-looking number.
+            per_problem = [statistics.fmean([1.0 if hit(x.key, g) else 0.0
+                                             for x in s])
+                           for s, g in zip(samples, golds)]
+            lo1, hi1 = bootstrap_ci(per_problem)
             curve.append({"n": 1, "random": e, "majority": e, "coverage": e,
                           "sd": 0.0, "majority_ci95": [round(lo1, 2),
                                                        round(hi1, 2)],
@@ -297,6 +340,8 @@ def main():
 
         rnd, maj, cov = (100 * statistics.fmean(x)
                          for x in (rnd_hits, maj_hits, cov_hits))
+        # Coverage has a closed form at every k, not just at the full pool.
+        cov = exact_coverage(samples, golds, n)
         if n == n_max:
             # Every draw at full N is a permutation of the whole pool, so the
             # resampled mean is estimating a quantity we can just compute.
@@ -443,7 +488,16 @@ def main():
           f"{100*statistics.fmean(maj_hits01):.1f}%  95% CI [{lo:.1f}, {hi:.1f}]")
 
     # ------------------------------------------------------------- summary
-    out = os.path.join(here, "results", "gsm8k_summary.json")
+    # Derived from the input, never fixed. This used to be hard-coded to
+    # results/gsm8k_summary.json regardless of which trajectory file was
+    # analysed -- and that one file is what make_figures.py, marca.py and
+    # sync_docs.py all read, so pointing this script at any other dataset
+    # silently replaced every published number with that dataset's. The
+    # docstring of run_models.py invites exactly that.
+    stem = os.path.splitext(os.path.basename(path))[0]
+    stem = stem[:-len("_trajectories")] if stem.endswith("_trajectories") else stem
+    out = args_out or os.path.join(os.path.dirname(path) or ".",
+                                   stem + "_summary.json")
     with io.open(out, "w", encoding="utf-8") as fh:
         json.dump({
             "problems": n_prob, "n_generated": n_max,
@@ -475,10 +529,15 @@ def main():
             },
             "selectors_at_n_max": rows,
             "symbolic_merge_capped_calls": merge_cap_hits(),
+            "symbolic_merge_calls": merge_calls(),
             "reextraction_drift": drift,
         }, fh, indent=2)
-    print("\n  select() calls that hit the symbolic-merge cap: %s"
-          % format(merge_cap_hits(), ","))
+    # Reset at the start of the run and reported with a denominator: a bare
+    # count says nothing without knowing how many calls there were, and the
+    # counter is process-global so anything that ran before would be included.
+    print("\n  merge-cap fallbacks: %s of %s grouping calls (%.2f%%)"
+          % (format(merge_cap_hits(), ","), format(merge_calls(), ","),
+             100.0 * merge_cap_hits() / max(1, merge_calls())))
     print(f"\n  summary written to {os.path.relpath(out, here)}")
     return 0
 

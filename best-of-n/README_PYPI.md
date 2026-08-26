@@ -15,7 +15,7 @@
 [![PyPI](https://img.shields.io/pypi/v/bestofn?color=blue)](https://pypi.org/project/bestofn/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21936832.svg)](https://doi.org/10.5281/zenodo.21936832)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](https://github.com/voidlinestudios12-jpg/Interlace-AI/blob/main/best-of-n/LICENSE)
-[![Tests](https://img.shields.io/badge/tests-224%20passing-brightgreen)](https://github.com/voidlinestudios12-jpg/Interlace-AI/blob/main/best-of-n/tests/test_selectors.py)
+[![Tests](https://img.shields.io/badge/tests-235%20passing-brightgreen)](https://github.com/voidlinestudios12-jpg/Interlace-AI/blob/main/best-of-n/tests/test_selectors.py)
 [![Reproducible](https://img.shields.io/badge/every%20figure-reproducible%20in%202%20min-blueviolet)](https://github.com/voidlinestudios12-jpg/Interlace-AI/blob/main/best-of-n/results/)
 
 ```bash
@@ -109,12 +109,12 @@ weights frozen. Every figure is recomputed from the published trajectories by
 <!-- auto:curve -->
 | N | random | majority | 95% CI | coverage |
 |---:|---:|---:|---:|---:|
-| 1 | 45.3% | 45.3% | [44.7, 45.9] | 45.3% |
-| 2 | 46.4% | 46.5% | [37.0, 50.5] | 56.9% |
-| 4 | 46.1% | 53.0% | [45.0, 58.5] | 66.4% |
+| 1 | 45.3% | 45.3% | [40.3, 50.5] | 45.3% |
+| 2 | 46.4% | 46.5% | [37.0, 50.5] | 56.7% |
+| 4 | 46.1% | 53.0% | [45.0, 58.5] | 66.6% |
 | 8 | 46.2% | 58.3% | [52.0, 65.5] | 75.0% |
 | 16 | 46.1% | 61.8% | [55.0, 68.0] | 81.7% |
-| 32 | 46.5% | 64.0% | [56.0, 69.0] | 86.8% |
+| 32 | 46.5% | 64.0% | [56.0, 69.0] | 86.7% |
 | 64 | 46.1% | 65.5% | [58.5, 72.0] | 90.6% |
 | **128** | 46.3% | **66.5%** | [60.5, 73.0] | **93.5%** |
 <!-- /auto:curve -->
@@ -183,11 +183,11 @@ nothing to score them with. Plug one in and the same table prints them.
 | | |
 |---|---|
 | Trajectories generated | 25,600 |
-| Cast a vote | 24,797 — 96.9% |
-| Abstained | 803 — 3.1% |
+| Cast a vote | 24,788 — 96.8% |
+| Abstained | 812 — 3.2% |
 | Truncated at the token limit | 216 — 0.8% (215 of them abstained) |
 | Tokens generated | 8,434,157 |
-| Re-extraction drift on replay | **0** |
+| Re-extraction drift on replay | **9** |
 <!-- /auto:accounting -->
 
 All 25,600 trajectories are published in full.

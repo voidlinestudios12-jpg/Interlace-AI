@@ -102,13 +102,28 @@ _NOISE_SYMBOLS = (r"\!", r"\,", r"\;", r"\:", r"\ ", r"\$", r"\%", "$", "%")
 #: the fusion between digits.
 _GAP = chr(0xE002)
 
+#: **The rule this sentinel enforces.** Any substitution that can delete
+#: content from between two surviving characters must replace it with ``_GAP``,
+#: never with ``""``. Deleting outright fuses whatever was on either side:
+#: ``5\text{ feet } 6\text{ inches}`` becomes ``56``, ``16 \text{ candles and
+#: } 4`` becomes ``164``, ``45^\circ 30`` becomes ``4530``. Those are not lost
+#: answers, they are invented ones, and an invented number can match another
+#: problem's reference by accident.
+#:
+#: Three releases fixed this list by list -- the noise words, then the spacing
+#: symbols -- and each time the next audit found an unguarded deletion one
+#: block over. It is a property of every deletion in this function, so it is
+#: written here rather than rediscovered per site.
+
 _NOISE_WORDS_RE = re.compile(
     r"\\(?:" + "|".join(sorted(_NOISE_WORDS, key=len, reverse=True))
     + r")(?![A-Za-z])"
 )
 # Whitespace is not stripped until the end, so the sentinel usually has
 # a real space beside it when this runs.
-_GAP_FUSES_DIGITS = re.compile(r"[0-9]\s*" + _GAP + r"\s*[0-9]")
+# One or more sentinels: "{1}{2}" leaves two adjacent (the closing brace
+# and the opening one), and a run of deletions can leave several.
+_GAP_FUSES_DIGITS = re.compile(r"[0-9](?:\s*" + _GAP + r")+\s*[0-9]")
 
 #: 1,000 or 1{,}000 -> 1000, but only when the commas really do group digits.
 _THOUSANDS = re.compile(r"^(-?\d{1,3})((?:\{?,\}?\d{3})+)(\.\d+)?$")
@@ -205,8 +220,10 @@ def _latex_to_text(s: str) -> Optional[str]:
     if whole:                               # the prose IS the answer
         return re.sub(r"\s+", " ", whole.group(1)).strip()
 
+    # Units are deleted, and the deletion leaves a gap: "5\\text{ feet }
+    # 6\\text{ inches}" is two measurements, not the number 56.
     s = _TEXTUAL.sub(
-        lambda m: "" if _is_unit(m.group(1)) else (m.group(1) or ""), s)
+        lambda m: _GAP if _is_unit(m.group(1)) else (m.group(1) or ""), s)
 
     # A mixed number has to be resolved before the general \frac rule sees it.
     # "2\frac{1}{2}" is two and a half, but juxtaposition means multiplication
@@ -243,9 +260,9 @@ def _latex_to_text(s: str) -> Optional[str]:
     # matches the start of \circlearrowleft, \circledast and a dozen others,
     # which then lose their backslash and slip past the unresolved-command
     # check as a fabricated vote -- the same defect as \left matching \le.
-    s = re.sub(r"\^\s*\{\s*\\(?:circ|degree)(?![A-Za-z])\s*\}", "", s)
-    s = re.sub(r"\^\s*\\(?:circ|degree)(?![A-Za-z])", "", s)
-    s = re.sub(r"\\(?:circ|degree)(?![A-Za-z])", "", s)
+    s = re.sub(r"\^\s*\{\s*\\(?:circ|degree)(?![A-Za-z])\s*\}", _GAP, s)
+    s = re.sub(r"\^\s*\\(?:circ|degree)(?![A-Za-z])", _GAP, s)
+    s = re.sub(r"\\(?:circ|degree)(?![A-Za-z])", _GAP, s)
 
     s = re.sub(r"\^\s*\{([^{}]*)\}", r"**(\1)", s)
     s = re.sub(r"\^(-?\w)", r"**\1", s)
@@ -257,8 +274,9 @@ def _latex_to_text(s: str) -> Optional[str]:
     # unresolved-command check below waves it through as a vote.
     s = _NOISE_WORDS_RE.sub(_GAP, s)
     for tok in _NOISE_SYMBOLS:
-        s = s.replace(tok, _GAP if tok in (r"\!", r"\,", r"\;", r"\:", r"\ ")
-                      else "")
+        # Every one of them, not just the spacing five. "$" and "%" sit
+        # between things too, and deleting one fused the digits either side.
+        s = s.replace(tok, _GAP)
 
     # Commands with an unambiguous plain form.
     #
@@ -291,13 +309,18 @@ def _latex_to_text(s: str) -> Optional[str]:
     # Two digits that were only ever separated by a spacing command are two
     # numbers, not one. Joining them manufactures an answer -- "7 \\quad 3"
     # became "73" -- so abstain rather than guess which was meant.
+    # Grouping braces go, and they leave a gap too: "{1}{2}" is two groups,
+    # and joining them manufactures the answer 12.
+    s = s.replace("\\", "").replace("{", _GAP).replace("}", _GAP)
+    s = s.replace(_LB, "{").replace(_RB, "}")
+    s = re.sub(r"\s+", "", s)
+
+    # The fusion check runs *after* every deletion, not in the middle of them.
+    # Run mid-way -- which is where it used to sit -- it could only see the
+    # deletions that had already happened.
     if _GAP_FUSES_DIGITS.search(s):
         return None
     s = s.replace(_GAP, "")
-
-    s = s.replace("\\", "").replace("{", "").replace("}", "")
-    s = s.replace(_LB, "{").replace(_RB, "}")
-    s = re.sub(r"\s+", "", s)
 
     return _strip_thousands(s.strip())
 
@@ -432,18 +455,76 @@ def extract_number(text: str) -> str:
     return nums[-1].replace(",", "") if nums else ""
 
 
-def extract_letter(text: str, options: str = "ABCD") -> str:
-    """Last standalone option letter, preferring one inside ``\\boxed{}``."""
+def _match_braces(text: str, start: int):
+    """Contents of the brace group opening at ``start``, or ``None``.
+
+    ``start`` is the index just past the ``{``. Returns ``None`` when the
+    group never closes, which is what a truncated trajectory looks like.
+    """
+    depth = 1
+    i = start
+    n = len(text)
+    while i < n and depth:
+        c = text[i]
+        if c == "\\":                       # skip an escaped character
+            i += 2
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if not depth:
+                return text[start:i]
+        i += 1
+    return None
+
+
+def extract_letter(text: str, options: str = "ABCD",
+                   allow_fallback: bool = False) -> str:
+    """The option letter inside the last ``\\boxed{}``, or ``""``.
+
+    Three things here are deliberate, and all three were wrong before.
+
+    **The box is brace-matched, not sliced.** A fixed 60-character window ran
+    past the closing brace, so a letter in the prose after the box could win,
+    and a long answer inside the box was truncated away.
+
+    **The letter must stand alone.** Taking the first character in
+    ``[ABCDabcd]`` meant the letters of ordinary words voted: the 'a' of
+    ``\\mathbf`` made ``\\boxed{\\mathbf{B}}`` return ``A``, the 'b' of
+    ``\\textbf`` made ``\\boxed{\\textbf{C}}`` return ``B``, and the 'a' of
+    "answer" made ``\\boxed{answer: B}`` return ``A``. Because the mistake is
+    deterministic it repeated on every trajectory, so the vote did not
+    fragment the way a random error would -- it agreed, confidently, on a
+    wrong answer. Bold-facing is the commonest way a model emphasises its
+    choice, which made this the likeliest input rather than a corner case.
+
+    **Guessing is opt-in.** Falling back to the last standalone letter
+    anywhere in the text meant an empty box still voted, using a letter the
+    model had mentioned while ruling it *out*. That now requires
+    ``allow_fallback=True``, matching :func:`extract_boxed`.
+    """
     if not text:
         return ""
+
+    letters = "".join(sorted(set(options.upper() + options.lower())))
+    standalone = re.compile(r"(?<![A-Za-z])([" + letters + r"])(?![A-Za-z])")
+
     idx = text.rfind("\\boxed{")
     if idx != -1:
-        # Start *after* the token: the 'b' of "boxed" would otherwise match.
-        inner = text[idx + len("\\boxed{"):idx + len("\\boxed{") + 60]
-        m = re.search(rf"[{options}{options.lower()}]", inner)
-        if m:
-            return m.group(0).upper()
-    found = re.findall(rf"\b([{options}])\b", text)
+        inner = _match_braces(text, idx + len("\\boxed{"))
+        if inner is not None:
+            # Strip the commands themselves before looking: \mathbf and
+            # \textbf contain option letters, and they are not the answer.
+            bare = re.sub(r"\\[A-Za-z]+", " ", inner)
+            hits = standalone.findall(bare)
+            if hits:
+                return hits[-1].upper()
+            return ""                       # a box with no letter is no vote
+
+    if not allow_fallback:
+        return ""
+    found = re.findall(r"\b([" + options.upper() + r"])\b", text)
     return found[-1] if found else ""
 
 
@@ -530,7 +611,32 @@ def _fold_case(s: str) -> str:
     return "".join(out)
 
 
-def normalise(answer: str) -> str:
+def normalise(answer) -> str:
+    """Canonical form so equivalent answers are counted as the same vote.
+
+    ``"204"``, ``"204.0"`` and ``" 204 "`` all become ``"204"``. Digit-grouping
+    commas are removed, exact integer fractions are reduced, and non-finite
+    values are rejected.
+
+    **This function never raises.** It sits behind :attr:`Sample.key`, so an
+    exception here does not cost one vote: it takes ``select``, ``agreement``,
+    ``effective_n`` and ``abstentions`` down for the entire pool, and 127 good
+    trajectories die with the one bad one.
+
+    That has now been fixed twice by guarding whichever branch an audit
+    demonstrated -- the fraction branch, then the ``str()`` coercion above it
+    -- and found again both times, one block over. So the guard is here, at
+    the boundary, where an edit inside the body cannot step around it. An
+    answer that cannot be canonicalised abstains, which is the documented
+    behaviour for an unusable answer anyway.
+    """
+    try:
+        return _normalise_inner(answer)
+    except Exception:                       # noqa: BLE001 -- deliberately broad
+        return ""
+
+
+def _normalise_inner(answer) -> str:
     """Canonical form so equivalent answers are counted as the same vote.
 
     ``"204"``, ``"204.0"`` and ``" 204 "`` all become ``"204"``. Digit-grouping

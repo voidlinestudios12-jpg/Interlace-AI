@@ -2,6 +2,110 @@
 
 All notable changes to `bestofn`.
 
+## 1.1.6 — 2026-08-26
+
+A fifth adversarial audit. It re-derived every published number independently
+and all of them matched, and it confirmed the four permutation bugs each turn
+the suite red on reintroduction. It also found that **both of the previous
+release's headline fixes were still present, one code block away from where
+they had been fixed** — the third round in a row that pattern has held. This
+release stops fixing the case the auditor demonstrated and fixes the rule
+instead.
+
+### The two that came back
+
+- **`normalise` still raised.** 1.1.4 guarded the integer branch, 1.1.5 guarded
+  the fraction branch, and the fault was in the `str()` coercion *above* both
+  of them: `math.factorial(1600)` is 4,413 digits, CPython refuses to convert
+  it, and `normalise` sits behind `Sample.key` — so one such answer took
+  `select`, `agreement`, `effective_n` and `abstentions` down for the whole
+  pool of 128. The guard is now at the **function boundary**, where no future
+  edit inside the body can step around it. 30,000 fuzzed inputs, zero raises.
+- **The extractor still fabricated fused numbers.** 1.1.5 added a sentinel so
+  a deleted spacing command could not join the digits on either side of it,
+  and wired it into two of the six places that delete things. The `\text{unit}`
+  deletion — the commonest one in real output — was not among them:
+  `\boxed{16 \text{ candles and } 4 \text{ flashlights}}` returned the vote
+  `164`. **It fired eight times in the published run.** None of the eight
+  happened to match a gold answer, so no published number moves, but the
+  module's first rule is "never invent an answer" and it was being broken.
+  The rule is now written down once and applied to every deletion — units,
+  degrees, `$`, `%` and the grouping braces — and the fusion check runs after
+  all of them rather than in the middle.
+
+### The one nobody had looked at
+
+- **`extract_letter` voted with the letters inside English words.** It sliced
+  a fixed 60 characters after `\boxed{` without matching the brace, then took
+  the first character in `[ABCDabcd]`. So `\boxed{\mathbf{B}}` returned **A** —
+  the "a" of `mathbf`. Bold-facing is the commonest way a model emphasises a
+  multiple-choice answer, and because the mistake is deterministic it repeated
+  on every trajectory: the vote did not fragment the way a random error would,
+  it **agreed, confidently, on the wrong answer**. The box is brace-matched
+  now, the letter must stand alone, and the guess-from-prose fallback is
+  opt-in like `extract_boxed`'s. It had two test checks; it has eleven.
+
+### Two pictures that were still serving withdrawn claims
+
+- **`verifier_bestofn.gif`**, live on the model card, animated "AIME 2024 ·
+  N=32 · 90 problems", "verifier, weighted vote 52.2%" and "+16.6 points" —
+  every one of them withdrawn in TR-2026-02 §8. Five audits missed it because
+  they read text and this is a picture. Replaced with one that shows what
+  exists: the API, the range check, the licence warning, and no result claim.
+  `terminal_bestofn.gif` announced "installed bestofn-1.0.0".
+- A complete runnable copy of the retracted demo was still on disk. Moved to a
+  `RETIRADO_1.0/` directory with a README saying why it must not be published.
+
+### Measurement
+
+- **Coverage is computed, not estimated.** This project argues at length for
+  closed forms over Monte Carlo, applied that to the random baseline, and left
+  coverage — the other headline number, the one the 27-point gap is measured
+  from — as a 200-draw resample carrying up to 0.20 points of avoidable noise.
+  It now uses the unbiased pass@k estimator, `1 − C(n−c,k)/C(n,k)`.
+- **The N=1 confidence interval was 8.5× too narrow.** It bootstrapped 25,600
+  trajectories as if independent, ignoring that they come in 128-way clusters
+  per problem, while every other row in the same table bootstrapped 200
+  problems. Two kinds of interval printed one above the other, and the
+  misleadingly tight one was the baseline of the whole +21.2 headline.
+- **`p ≤` now rounds up.** `"%.1e" % 1.44e-05` prints `1.4e-05`, which is
+  smaller than the value it claims to bound. This shipped once as `%.0e`, and
+  the fix then was to add a digit — the same bug one digit over. Rounding up
+  to two significant figures does not depend on the mantissa being lucky.
+- **`analyse.py` no longer overwrites the published summary** whatever file you
+  point it at. The output path was fixed, and that one file is what the
+  figures, the brand charts and the doc generator all read — so analysing any
+  other dataset silently replaced every published number with that dataset's.
+  `run_models.py`'s docstring invited exactly that.
+- The merge-cap count is reported with a denominator and the counter is reset
+  at the start of a run: 2,040 of 282,000 grouping calls, 0.72%.
+
+### Also
+
+- `select(..., "verifier")` warns when trajectories have no usable score
+  instead of silently weighting them zero. A reward model that runs out of
+  memory fails on the *longest* trajectories, so the missing scores are
+  systematically the ones most worth having.
+- `temperature=inf` was accepted (`inf <= 0` is False, like the NaN case
+  before it).
+- `Result.total_tokens` returned a partial sum as a total when some
+  trajectories lacked a count.
+- `solve_batch` raises on a mismatched `golds` length rather than an
+  `IndexError` several frames later.
+- `select()` warns once when `math-verify` is absent. Only `BestOfN.__init__`
+  did, so the documented select-only path degraded in silence.
+- The 1.1.5 changelog cited three verification figures that do not reproduce —
+  "54 hostile inputs" (20), "1 MB strings" (100 KB), "54 fabricated votes"
+  (60) — in the entry whose subject was that verifications must be committed
+  tests rather than claims. Corrected.
+- Figure 08's footer was clipped mid-word at the right edge.
+
+### Numbers
+
+Unchanged: 45.3% → 66.5% at N=128, coverage 93.5%, random 46.3%, +21.2 points
+of which 20.2 are selection, McNemar p ≤ 6.6 × 10⁻⁵ at every one of 200 seeds.
+235 tests.
+
 ## 1.1.5 — 2026-08-26
 
 A fourth adversarial audit. It found the two defects the previous release
@@ -30,8 +134,8 @@ have been confirmed to fail when the bug is put back.
   and left it in the fraction branch, so a 5,000-digit numerator still raised
   and still took `select`, `agreement`, `effective_n` and `abstentions` down
   with it for the entire pool. Both branches are string-canonicalised now, and
-  `tests/test_latex_catalogue.py` fuzzes 54 hostile inputs — `None`, non-str,
-  control characters, unicode digits, 1 MB strings, `1e999999` — through
+  `tests/test_latex_catalogue.py` fuzzes 20 hostile inputs — `None`, non-str,
+  control characters, unicode digits, 100 KB strings, `1e999999` — through
   `normalise` and through a poisoned 128-trajectory pool.
 
 ### Fixed — the verifications that did not exist
@@ -39,7 +143,7 @@ have been confirmed to fail when the bug is put back.
 - **`tests/test_latex_catalogue.py`** is new: 217 real LaTeX commands, each in
   three shapes, every one of which must make the extractor abstain, plus 20
   legitimate forms that must still vote. Reintroducing the prefix bug turns up
-  54 fabricated votes and the suite goes red. The 1.1.4 changelog cited "a
+  60 fabricated votes and the suite goes red. The 1.1.4 changelog cited "a
   catalogue of 89 real LaTeX commands"; that catalogue was run in a terminal
   and never committed.
 - **The permutation fuzz could not see one of the four bugs it covers.**

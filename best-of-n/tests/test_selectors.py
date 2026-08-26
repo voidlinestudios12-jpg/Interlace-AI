@@ -17,6 +17,9 @@ from bestofn import (Sample, abstentions, agreement, coverage,  # noqa: E402
                      effective_n, extract_boxed, extract_letter,
                      extract_number, normalise, select)
 
+BS = chr(92)
+BOXL = BS + "boxed"
+
 passed = failed = 0
 
 
@@ -49,7 +52,35 @@ check("boxed negative", extract_boxed(r"\boxed{-17}"), "-17")
 check("boxed units stripped", extract_boxed(r"\boxed{204\text{ km}}"), "204")
 check("boxed empty input", extract_boxed(""), "")
 check("letter from box", extract_letter(r"therefore \boxed{C}"), "C")
-check("letter standalone", extract_letter("the answer is B"), "B")
+# Guessing at a letter loose in the prose is opt-in now, exactly as it is for
+# extract_boxed. It used to be always on, so a box with nothing in it still
+# voted -- with a letter the model had often mentioned while ruling it out.
+check("letter fallback is opt-in", extract_letter("the answer is B"), "")
+check("letter fallback when asked",
+      extract_letter("the answer is B", allow_fallback=True), "B")
+
+print("")
+print("REGRESSION F3 - a letter must stand alone, not sit inside a word")
+# \mathbf contains an 'a' and \textbf a 'b'. Taking the first character in
+# [ABCDabcd] made bold-facing -- the commonest way a model marks its choice --
+# return the wrong letter, and return it identically on every trajectory, so
+# the vote did not fragment: it agreed, confidently, on the wrong answer.
+check("bold B is B, not the a of mathbf",
+      extract_letter(BOXL + "{" + BS + "mathbf{B}}"), "B")
+check("bold C is C, not the b of textbf",
+      extract_letter(BOXL + "{" + BS + "textbf{C}}"), "C")
+check("roman C is C", extract_letter(BOXL + "{" + BS + "mathrm{C}}"), "C")
+check("prose inside the box does not vote for its own letters",
+      extract_letter(BOXL + "{answer: B}"), "B")
+check("the box is brace-matched, not a 60-character window",
+      extract_letter(BOXL + "{" + "7" * 70 + "C}"), "C")
+check("text after the box cannot win",
+      extract_letter("we ruled out A, so " + BOXL + "{42} but option A lost"), "")
+check("an empty box is not a vote",
+      extract_letter("we ruled out A, so " + BOXL + "{  }"), "")
+check("a number is not a letter", extract_letter(BOXL + "{42}"), "")
+check("lower case is folded", extract_letter(BOXL + "{c}"), "C")
+check("parenthesised option", extract_letter(BOXL + "{(A)}"), "A")
 
 print("\nREGRESSION E1 - fractions and radicals must not collapse to a digit")
 check("half", extract_boxed(r"\boxed{\frac{1}{2}}"), "1/2")

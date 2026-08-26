@@ -19,6 +19,8 @@ import io
 import json
 import os
 
+import math
+
 import matplotlib.image as mpimg
 from matplotlib import font_manager
 from matplotlib.offsetbox import AnnotationBbox, OffsetImage
@@ -38,6 +40,22 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)                      # the package root
 LOGO = os.path.join(HERE, "interlace-logo.png")
 SUMMARY = os.path.join(ROOT, "results", "gsm8k_summary.json")
+
+
+def ceil_sig(x, digits=2):
+    """Round ``x`` UP to ``digits`` significant figures.
+
+    Needed wherever a number is printed after "p <=". ``"%.1e" % 1.44e-05``
+    gives ``1.4e-05``, which is smaller than the value it claims to bound, so
+    the printed inequality is false. This shipped once as ``%.0e`` on a worst
+    case of 1.401e-05; the fix then was to add a digit, which is the same bug
+    one digit over. Rounding up is the fix that does not depend on the
+    mantissa being lucky.
+    """
+    if not x or not math.isfinite(x):
+        return x
+    e = math.floor(math.log10(abs(x))) - (digits - 1)
+    return math.ceil(x / 10 ** e) * 10 ** e
 
 
 def font():
@@ -68,7 +86,8 @@ def data():
     # single-seed figure kept for continuity; printing it on the two lead
     # charts put a cherry-picked 1.2e-07 beside the README's honest 1.4e-05.
     mc = d["mcnemar_majority_vs_random"]
-    d["p"] = mc.get("p_value_worst", mc["p_value"])
+    d["p"] = ceil_sig(mc.get("p_value_worst", mc["p_value"]))
+    d["p_exact"] = mc.get("p_value_worst", mc["p_value"])
     d["p_median"] = mc.get("p_value_median")
     d["p_seeds"] = mc.get("seeds")
     d["trajectories"] = d["problems"] * d["n_generated"]

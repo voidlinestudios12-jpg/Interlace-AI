@@ -56,7 +56,7 @@ from typing import Dict, List, Optional, Sequence
 from .extract import equivalent, have_math_verify, normalise
 
 __all__ = ["Sample", "select", "agreement", "coverage", "SELECTORS",
-           "effective_n", "abstentions", "merge_cap_hits"]
+           "effective_n", "abstentions", "merge_cap_hits", "merge_calls"]
 
 #: How many times :func:`_merge_map` has fallen back to exact matching because
 #: the pool held more distinct answers than ``_MERGE_LIMIT``.
@@ -67,6 +67,18 @@ __all__ = ["Sample", "select", "agreement", "coverage", "SELECTORS",
 #: distinct-answer count, near-identical pools collapsed into one. The
 #: published summary reported 28 where the true figure was 2,040.
 _MERGE_CAP_HITS = [0]
+
+#: Total calls to :func:`_merge_map`, so the cap count above can be reported
+#: as a fraction. A bare "2,040 fallbacks" says nothing without it.
+_MERGE_CALLS = [0]
+
+
+def merge_calls(reset: bool = False) -> int:
+    """Total grouping calls so far; the denominator for :func:`merge_cap_hits`."""
+    n = _MERGE_CALLS[0]
+    if reset:
+        _MERGE_CALLS[0] = 0
+    return n
 
 
 def merge_cap_hits(reset: bool = False) -> int:
@@ -228,6 +240,7 @@ def _merge_map(keys: Sequence[str]) -> Dict[str, str]:
     represented by something that did not match it. The winner has to be a
     string the caller can compare against their reference.
     """
+    _MERGE_CALLS[0] += 1
     order: Dict[str, int] = {}
     counts: Dict[str, int] = {}
     for k in keys:
@@ -362,6 +375,29 @@ def _check_scores(items: List[Sample]) -> None:
         )
 
 
+_WARNED_NO_MATH = [False]
+
+
+def _warn_symbolic_once() -> None:
+    """Say once, per process, that the symbolic layer is missing.
+
+    ``BestOfN.__init__`` warns, but the documented ``select``-only path --
+    scoring trajectories you already have -- reached none of that, so a whole
+    analysis could run with textual comparison and never mention it. That is
+    the quiet degradation this module's docstring says it does not do.
+    """
+    if _WARNED_NO_MATH[0] or have_math_verify():
+        return
+    _WARNED_NO_MATH[0] = True
+    warnings.warn(
+        "bestofn: math-verify is not installed, so answers are compared as "
+        "text. 1/2, 0.5 and \\frac{1}{2} will vote as three different "
+        "answers and your numbers will come out lower than they should. "
+        "Install with: pip install \"bestofn[math]\"",
+        RuntimeWarning, stacklevel=3,
+    )
+
+
 def select(samples: Sequence, method: str = "majority",
            gold: Optional[str] = None, seed: Optional[int] = None) -> str:
     """Return the final answer chosen among ``samples``, in canonical form.
@@ -380,6 +416,7 @@ def select(samples: Sequence, method: str = "majority",
             ``gold``, a verifier method is used with no scores, or verifier
             scores fall outside ``[0, 1]``.
     """
+    _warn_symbolic_once()
     items = _as_samples(samples)
     if not items:
         return ""
@@ -447,6 +484,28 @@ def select(samples: Sequence, method: str = "majority",
 
     # Computed once and threaded through: it is quadratic in distinct answers
     # and each comparison runs a symbolic parser.
+    # A verifier that returned nothing for some trajectories has not been
+     # caught by the guard above: that guard fires only when *no* score is
+     # finite, so one usable score was enough to let the rest through as
+     # weight zero, in silence. The module docstring promises "no silent
+     # degradation", and this was the loudest counterexample to it: a reward
+     # model that runs out of memory or times out fails on the *longest*
+     # trajectories, so the missing scores are systematically the ones most
+     # worth having, not a random sample.
+    if method in ("verifier", "verifier_argmax"):
+        scorable = [s for s in items if s.key]
+        missing = sum(1 for s in scorable if not _finite(s.score))
+        if missing:
+            warnings.warn(
+                f"bestofn: {missing} of {len(scorable)} answering trajectories "
+                f"have no usable verifier score and are being weighted at "
+                f"zero. If your verifier failed on them -- an out-of-memory or "
+                f"a timeout hits the longest trajectories first -- this vote "
+                f"is biased, not merely noisier. Pass only scored samples, or "
+                f"score them all.",
+                RuntimeWarning, stacklevel=3,
+            )
+
     merge = _merge_map([s.key for s in items if s.key])
 
     if method == "majority":

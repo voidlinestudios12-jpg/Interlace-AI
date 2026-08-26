@@ -27,7 +27,7 @@ from .extract import (equivalent, extract_boxed, extract_letter,
 from .select import (SELECTORS, Sample, abstentions, agreement, coverage,
                      effective_n, select)
 
-__version__ = "1.1.5"
+__version__ = "1.1.6"
 __author__ = "Alejandro Areces Rivera"
 __license__ = "Apache-2.0"
 

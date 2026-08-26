@@ -79,9 +79,18 @@ class Result:
 
     @property
     def total_tokens(self) -> Optional[int]:
-        """Generated tokens across all trajectories, if the backend reports it."""
-        counts = [s.n_tokens for s in self.samples if s.n_tokens is not None]
-        return sum(counts) if counts else None
+        """Generated tokens across all trajectories, or ``None``.
+
+        ``None`` when *any* trajectory is missing its count, not only when all
+        of them are. Summing the ones that happen to report gave a number
+        smaller than the truth and presented it as a total -- a compute
+        accounting that silently under-bills is worse than one that declines
+        to answer.
+        """
+        counts = [s.n_tokens for s in self.samples]
+        if not counts or any(c is None for c in counts):
+            return None
+        return sum(counts)
 
     @property
     def agreement(self) -> float:
@@ -498,11 +507,24 @@ class BestOfN:
         return self.solve_batch([problem], n=n, method=method, seed=seed,
                                 golds=[gold] if gold is not None else None)[0]
 
+    @staticmethod
+    def _check_batch(problems, golds):
+        """Reject a golds list that does not line up with the problems.
+
+        Zipping them silently truncated to the shorter, or raised a bare
+        IndexError several frames away from the mistake.
+        """
+        if golds is not None and len(golds) != len(problems):
+            raise ValueError(
+                f"golds has {len(golds)} entries for {len(problems)} problems; "
+                f"they must correspond one-to-one and in order.")
+
     def solve_batch(self, problems: Sequence[str], n: Optional[int] = None,
                     method: str = "majority",
                     golds: Optional[Sequence[str]] = None,
                     seed: Optional[int] = None) -> List[Result]:
         """Solve several problems. Much faster than looping :meth:`solve`."""
+        self._check_batch(problems, golds)
         n = int(n if n is not None else self.n)
         # Same guard as the constructor: n and temperature can both be
         # overridden here, and a per-call n>1 at temperature 0 would silently
@@ -644,8 +666,12 @@ def _check_sampling(n, temperature, top_p=1.0, max_tokens=1,
         raise ValueError(f"n must be a whole number, got {n!r}")
     if n < 1:
         raise ValueError("n must be >= 1")
-    if temperature != temperature:      # NaN <= 0 is False, so it slipped past
-        raise ValueError("temperature must be a number, got nan")
+    # NaN <= 0 is False and inf <= 0 is False, so both slipped past the
+    # temperature check below. An infinite temperature is a uniform
+    # distribution over the vocabulary; it does not fail here, it produces
+    # 128 trajectories of noise and a confident-looking abstention rate.
+    if not math.isfinite(temperature):
+        raise ValueError(f"temperature must be finite, got {temperature!r}")
     if not 0 < top_p <= 1:
         raise ValueError(f"top_p must be in (0, 1], got {top_p!r}")
     if max_tokens != max_tokens or max_tokens in (float("inf"), float("-inf")):

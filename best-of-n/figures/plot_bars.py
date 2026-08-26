@@ -68,13 +68,19 @@ fig.text(0.034, 0.108,
          "itself. Exact McNemar vs random: p \u2264 %.1e at every one of %d "
          "random seeds." % (gain, selection, d["p"], d["p_seeds"]),
          color=M.NOTA, fontsize=11.5, family=fam)
-fig.text(0.034, 0.075,
+# Two shorter lines rather than one that runs off the canvas. The single
+# line was clipped mid-word at the right edge -- on one of the two figures the
+# model card leads with.
+fig.text(0.034, 0.078,
          "Coverage is what the model reaches somewhere in its %d attempts. It "
-         "is a diagnostic ceiling, not a target: the problems holding it up "
-         "are single correct answers among %d, which no selector can pick out "
-         "without already knowing the answer." % (n, n),
+         "is a diagnostic ceiling, not a target:" % n,
+         color=M.NOTA, fontsize=11.5, family=fam)
+fig.text(0.034, 0.048,
+         "the problems holding it up are single correct answers among %d, "
+         "which no selector can pick out without already knowing which." % n,
          color=M.NOTA, fontsize=11.5, family=fam)
 
+# footer text omitted: the two lines above occupy that band now.
 M.footer(fig, None, "every number recomputable: scripts/analyse.py")
 
 fig.savefig(M.out("08_bars_n128.png"), facecolor=M.FONDO, dpi=100)
