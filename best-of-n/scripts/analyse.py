@@ -54,7 +54,24 @@ warnings.filterwarnings("ignore", message=".*symbolic merge limit.*")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from bestofn import Sample, coverage, normalise, select      # noqa: E402
+from bestofn.extract import equivalent                       # noqa: E402
 from bestofn.select import merge_cap_hits                    # noqa: E402
+
+
+def hit(answer, gold) -> bool:
+    """Whether a returned answer counts as correct.
+
+    One rule for the whole report. This script used to compare canonical keys
+    with ``==`` while ``coverage()`` in the same table used symbolic
+    equivalence, so the coverage column was scored more generously than the
+    accuracy columns beside it -- and more generously than
+    ``Result.is_correct``, which is what a reader of these numbers will
+    actually run. Two criteria in one report is how a selection gap gets
+    reported wider than it is.
+    """
+    if not answer:
+        return False
+    return equivalent(answer, gold)
 from bestofn.extract import extract_boxed                    # noqa: E402
 
 CURVE = (1, 2, 4, 8, 16, 32, 64, 128)
@@ -161,16 +178,26 @@ def main():
     total = sum(len(s) for s in samples)
     voting = sum(1 for s in samples for x in s if x.key)
     trunc = sum(1 for s in samples for x in s if x.truncated)
+    # Counted, not inferred. Subtracting truncations from abstentions assumes
+    # every truncated trajectory abstains, and one of them here did box an
+    # answer before running out of room -- so the published split was 216+587
+    # where the data says 215+588.
+    trunc_abstained = sum(1 for s in samples for x in s
+                          if x.truncated and not x.key)
+    trunc_voted = trunc - trunc_abstained
     toks = sum(x.n_tokens or 0 for s in samples for x in s)
     print(f"\n  trajectories total    : {total}")
     print(f"  cast a vote           : {voting}  ({100*voting/total:.1f}%)")
     print(f"  abstained             : {total-voting}  "
           f"({100*(total-voting)/total:.1f}%)")
     print(f"  truncated             : {trunc}  ({100*trunc/total:.1f}%)")
+    print(f"    of which abstained  : {trunc_abstained}")
+    print(f"    of which still voted: {trunc_voted}  "
+          f"(boxed an answer before running out of room)")
     print(f"  generated tokens      : {toks:,}")
 
     # ------------------------------------------- per-trajectory accuracy (p)
-    hits = [sum(1 for x in s if x.key and x.key == normalise(g))
+    hits = [sum(1 for x in s if hit(x.key, g))
             for s, g in zip(samples, golds)]
     p_bar = sum(hits) / total
     print(f"\n  per-trajectory accuracy (p): {100*p_bar:.1f}%")
@@ -200,9 +227,9 @@ def main():
                 # reimplementing the vote here. A published curve that bypasses
                 # select() does not exercise tie-breaking or answer merging,
                 # and can drift from what users actually get.
-                if select(draw, "majority") == normalise(g):
+                if hit(select(draw, "majority"), g):
                     m_ok += 1
-                if select(draw, "random", seed=rep) == normalise(g):
+                if hit(select(draw, "random", seed=rep), g):
                     r_ok += 1
                 if coverage(draw, g):
                     c_ok += 1
@@ -217,7 +244,7 @@ def main():
         # Confidence interval over problems, from one representative draw --
         # the resample spread (sd) and the sampling error over problems are
         # different quantities and both belong in the table.
-        one = [1.0 if select(rng.sample(s, n), "majority") == normalise(g)
+        one = [1.0 if hit(select(rng.sample(s, n), "majority"), g)
                else 0.0 for s, g in zip(samples, golds)]
         lo, hi = bootstrap_ci(one)
         curve.append({"n": n, "random": round(rnd, 2), "majority": round(maj, 2),
@@ -259,7 +286,6 @@ def main():
     print("IS THE DIFFERENCE REAL?   exact McNemar on paired discordances")
     print("=" * 74)
     maj_pick = [select(s, "majority") for s in samples]
-    gold_key = [normalise(g) for g in golds]
 
     # `random` is a different draw for every seed, so a p-value computed from
     # one of them is a property of that seed as much as of the data. Running
@@ -269,10 +295,10 @@ def main():
     trials = []
     for sd in range(P_SEEDS):
         rnd_pick = [select(s, "random", seed=sd) for s in samples]
-        a = sum(1 for m, r, g in zip(maj_pick, rnd_pick, gold_key)
-                if m == g and r != g)
-        b = sum(1 for m, r, g in zip(maj_pick, rnd_pick, gold_key)
-                if r == g and m != g)
+        a = sum(1 for m, r, g in zip(maj_pick, rnd_pick, golds)
+                if hit(m, g) and not hit(r, g))
+        b = sum(1 for m, r, g in zip(maj_pick, rnd_pick, golds)
+                if hit(r, g) and not hit(m, g))
         trials.append((mcnemar_exact(a, b), a, b))
     trials.sort()
     p_worst, a_worst, b_worst = trials[-1]
@@ -281,9 +307,9 @@ def main():
 
     full = [(m, r, g) for m, r, g in
             zip(maj_pick, [select(s, "random", seed=SEED) for s in samples],
-                gold_key)]
-    maj_only = sum(1 for m, r, g in full if m == g and r != g)
-    rnd_only = sum(1 for m, r, g in full if r == g and m != g)
+                golds)]
+    maj_only = sum(1 for m, r, g in full if hit(m, g) and not hit(r, g))
+    rnd_only = sum(1 for m, r, g in full if hit(r, g) and not hit(m, g))
     p = mcnemar_exact(maj_only, rnd_only)
 
     print(f"\n  majority vs random, N={n_max}, over {P_SEEDS} random seeds")
@@ -312,13 +338,13 @@ def main():
             for sd in range(P_SEEDS):
                 pick = [select(sm, "random", seed=sd) for sm in samples]
                 per_seed.append(statistics.fmean(
-                    [1.0 if a == g else 0.0 for a, g in zip(pick, gold_key)]))
+                    [1.0 if hit(a, g) else 0.0 for a, g in zip(pick, golds)]))
             acc = 100 * statistics.fmean(per_seed)
             sd_seeds = 100 * statistics.pstdev(per_seed)
-            hit = [1.0 if a == g else 0.0 for a, g in
-                   zip([select(sm, "random", seed=SEED) for sm in samples],
-                       gold_key)]
-            clo, chi = bootstrap_ci(hit)
+            hits01 = [1.0 if hit(a, g) else 0.0 for a, g in
+                      zip([select(sm, "random", seed=SEED) for sm in samples],
+                          golds)]
+            clo, chi = bootstrap_ci(hits01)
             rows.append({"selector": name, "accuracy": round(acc, 2),
                          "ci95": [round(clo, 2), round(chi, 2)],
                          "seeds": P_SEEDS, "sd_over_seeds": round(sd_seeds, 2)})
@@ -330,9 +356,9 @@ def main():
             got = [select(sm, "oracle", gold=g) for sm, g in zip(samples, golds)]
         else:
             got = [select(sm, name) for sm in samples]
-        hit = [1.0 if a == g else 0.0 for a, g in zip(got, gold_key)]
-        acc = 100 * statistics.fmean(hit)
-        clo, chi = bootstrap_ci(hit)
+        hits01 = [1.0 if hit(a, g) else 0.0 for a, g in zip(got, golds)]
+        acc = 100 * statistics.fmean(hits01)
+        clo, chi = bootstrap_ci(hits01)
         rows.append({"selector": name, "accuracy": round(acc, 2),
                      "ci95": [round(clo, 2), round(chi, 2)]})
         print("  %-16s %6.1f%%   95%% CI [%.1f, %.1f]" % (name, acc, clo, chi))
@@ -341,7 +367,7 @@ def main():
     print("  log-probabilities, so majority stays the default unless your own")
     print("  task shows the other one pulling ahead. Print both and look.")
 
-    maj_hits01 = [1.0 if m == g else 0.0 for m, _, g in full]
+    maj_hits01 = [1.0 if hit(m, g) else 0.0 for m, _, g in full]
     lo, hi = bootstrap_ci(maj_hits01)
     print(f"\n  majority accuracy at N={n_max}: "
           f"{100*statistics.fmean(maj_hits01):.1f}%  95% CI [{lo:.1f}, {hi:.1f}]")
@@ -361,7 +387,9 @@ def main():
             "n_voting": voting,
             "n_abstained": total - voting,
             "n_truncated": trunc,
-            "n_abstained_not_truncated": (total - voting) - trunc,
+            "n_truncated_and_abstained": trunc_abstained,
+            "n_truncated_but_voted": trunc_voted,
+            "n_abstained_not_truncated": (total - voting) - trunc_abstained,
             "total_tokens": toks,
             "curve": curve,
             "mcnemar_majority_vs_random": {

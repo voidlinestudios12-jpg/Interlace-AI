@@ -55,9 +55,9 @@ than once.
 
 | | single sample | **Best-of-128** |
 |---|---:|---:|
-| **GSM8K**, Qwen2.5-0.5B frozen | 45.0% | **66.5%** |
+| **GSM8K**, Qwen2.5-0.5B frozen | 45.1% | **66.5%** |
 
-**+21.5 points. Nothing was trained.**
+**+21.4 points. Nothing was trained.**
 
 </div>
 
@@ -117,15 +117,15 @@ weights frozen. Every figure is recomputed from the published trajectories by
 
 | N | random | majority | 95% CI | coverage |
 |---:|---:|---:|---:|---:|
-| 1 | 45.0% | 45.0% | [39.0, 52.0] | 45.1% |
-| 4 | 46.5% | 53.0% | [44.0, 57.0] | 66.7% |
-| 8 | 45.9% | 58.3% | [53.0, 66.5] | 75.0% |
-| 16 | 46.2% | 61.6% | [55.5, 69.0] | 81.7% |
-| 32 | 46.0% | 64.1% | [57.5, 70.5] | 86.7% |
-| 64 | 46.2% | 65.4% | [59.0, 72.0] | 90.6% |
-| **128** | 46.3% | **66.5%** | [60.5, 73.0] | **93.5%** |
+| 1 | 45.1% | 45.1% | [39.0, 52.0] | 45.1% |
+| 4 | 46.5% | 53.1% | [44.5, 57.5] | 66.7% |
+| 8 | 46.0% | 58.3% | [53.0, 66.5] | 75.0% |
+| 16 | 46.3% | 61.7% | [55.5, 69.0] | 81.7% |
+| 32 | 46.1% | 64.1% | [57.5, 70.5] | 86.7% |
+| 64 | 46.3% | 65.4% | [59.0, 72.0] | 90.6% |
+| **128** | 46.4% | **66.5%** | [60.5, 73.0] | **93.5%** |
 
-**45.0% to 66.5%** on a half-billion-parameter model, with the weights frozen
+**45.1% to 66.5%** on a half-billion-parameter model, with the weights frozen
 throughout. Against random selection at the same N, exact McNemar gives
 **p ≤ 1.4 × 10⁻⁵**, and the median across 200 random seeds is 1.5 × 10⁻⁹.
 
@@ -145,14 +145,14 @@ means anything:
 
 | | | |
 |---|---:|---:|
-| N=1, a single sample | 45.0% | |
-| N=128, **random** among the trajectories that answered | 46.3% | +1.3 |
-| N=128, **majority vote** | 66.5% | **+20.2** |
-| | | **+21.5 total** |
+| N=1, a single sample | 45.1% | |
+| N=128, **random** among the trajectories that answered | 46.4% | +1.3 |
+| N=128, **majority vote** | 66.5% | **+20.1** |
+| | | **+21.4 total** |
 
 Random selection improves slightly with N without selecting anything, because
 with more trajectories one of them usually did not abstain. Separating the two
-shows that **20.2 of the 21.5 points — 94% of the gain — is genuine
+shows that **20.1 of the 21.4 points — 94% of the gain — is genuine
 selection**, not an artefact of comparing a one-sample baseline against an
 N-sample system.
 
@@ -162,14 +162,18 @@ is small. It is small *because* the token budget lets trajectories finish; at a
 tighter budget the same experiment would have credited five times as much of
 the gain to the method.
 
-### Every selector, against the baseline
+### The selectors we can measure here, against the baseline
 
 | selector at N=128 | accuracy | 95% CI |
 |---|---:|---:|
-| `random` (mean of 200 seeds, sd 2.5) | 46.3% | [41.0, 55.0] |
+| `random` (mean of 200 seeds, sd 2.4) | 46.4% | [41.0, 55.0] |
 | `majority` | **66.5%** | [60.5, 73.0] |
 | `self_certainty` | 66.5% | [60.5, 73.0] |
 | `oracle` (diagnostic ceiling) | 93.5% | [90.0, 96.5] |
+
+`verifier` and `verifier_argmax` are absent because the published trajectories
+carry no reward-model scores — this release ships no reward model, so there was
+nothing to score them with. Plug one in and the same table prints them.
 
 ### The accounting
 
@@ -177,7 +181,7 @@ the gain to the method.
 |---|---|
 | Trajectories generated | 25,600 |
 | Cast a vote | 24,797 — 96.9% |
-| Truncated at the token limit | 216 — 0.8% |
+| Truncated at the token limit | 216 — 0.8% (215 of them abstained) |
 | Tokens generated | 8,434,157 |
 | Re-extraction drift on replay | **0** |
 | Generated on | one RTX 3090, vLLM backend, ~25 minutes |
@@ -309,8 +313,15 @@ live. The full table is in [USAGE.md](USAGE.md#using-someone-elses-reward-model)
 ## Everything here is checkable
 
 ```bash
+pip install "bestofn[math]"
 python scripts/analyse.py     # no GPU needed
 ```
+
+The `[math]` extra pulls in `math-verify`, which is what makes `1/2`, `0.5` and
+`\frac{1}{2}` count as one answer. Without it the script still runs and still
+reports, but equivalent answers written differently vote separately and the
+numbers come out slightly lower. Regenerating the figures additionally needs
+`matplotlib`; the analysis itself does not.
 
 The published dataset contains the **complete reasoning text** of every
 trajectory, with `finish_reason`, log-probabilities and token counts — not

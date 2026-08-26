@@ -126,6 +126,26 @@ _MAX_NESTING = 24
 #: ``\begin``/``\end`` are caught by the same rule.
 _LEFTOVER_COMMAND = re.compile(r"\\[A-Za-z]")
 
+#: Commands with one unambiguous plain-text form.
+_PLAIN_FORM = {
+    "geq": ">=", "ge": ">=", "leq": "<=", "le": "<=",
+    "neq": "!=", "ne": "!=", "pm": "+-",
+    "circ": "", "degree": "",
+    "cdot": "*", "times": "*", "div": "/", "infty": "inf",
+    "pi": "pi", "theta": "theta", "alpha": "alpha", "beta": "beta",
+    "gamma": "gamma", "phi": "phi", "lambda": "lambda", "mu": "mu",
+    "sigma": "sigma", "omega": "omega",
+}
+
+#: Longest name first so ``geq`` wins over ``ge``, and ``(?![A-Za-z])`` so a
+#: command is only rewritten when the name ends there. Without that lookahead
+#: ``\left`` matched ``\le`` and became ``<=ft`` -- a fabricated vote, because
+#: the mangled text no longer looks like an unresolved command.
+_PLAIN_FORM_RE = re.compile(
+    r"\\(" + "|".join(sorted(_PLAIN_FORM, key=len, reverse=True))
+    + r")(?![A-Za-z])"
+)
+
 
 def _is_unit(content: str) -> bool:
     """Whether a ``\\text{...}`` group is a unit rather than the answer."""
@@ -194,28 +214,32 @@ def _latex_to_text(s: str) -> Optional[str]:
     # "45^{\circ}" becomes "45**(\circ)" and then "45**()", which is not a
     # number; dropping only the marker leaves "90^", which no longer compares
     # equal to a gold of "90".
-    s = re.sub(r"\^\s*\{\s*\\(?:circ|degree)\s*\}", "", s)
-    s = re.sub(r"\^\s*\\(?:circ|degree)", "", s)
-    s = re.sub(r"\\(?:circ|degree)", "", s)
+    # Every one of these needs the trailing lookahead. Without it "circ" also
+    # matches the start of \circlearrowleft, \circledast and a dozen others,
+    # which then lose their backslash and slip past the unresolved-command
+    # check as a fabricated vote -- the same defect as \left matching \le.
+    s = re.sub(r"\^\s*\{\s*\\(?:circ|degree)(?![A-Za-z])\s*\}", "", s)
+    s = re.sub(r"\^\s*\\(?:circ|degree)(?![A-Za-z])", "", s)
+    s = re.sub(r"\\(?:circ|degree)(?![A-Za-z])", "", s)
 
     s = re.sub(r"\^\s*\{([^{}]*)\}", r"**(\1)", s)
     s = re.sub(r"\^(-?\w)", r"**\1", s)
     s = re.sub(r"_\s*\{([^{}]*)\}", r"_\1", s)
 
-    # Commands with an unambiguous plain form. Order matters: "geq" has to be
-    # tried before "ge", or the shorter name eats the start of the longer one.
-    for name, plain in (
-            ("geq", ">="), ("leq", "<="), ("neq", "!="), ("ge", ">="),
-            ("le", "<="), ("ne", "!="), ("pm", "+-"), ("circ", ""),
-            ("degree", ""), ("cdot", "*"), ("times", "*"), ("div", "/"),
-            ("infty", "inf"), ("pi", "pi"), ("theta", "theta"),
-            ("alpha", "alpha"), ("beta", "beta"), ("gamma", "gamma"),
-            ("phi", "phi"), ("lambda", "lambda"), ("mu", "mu"),
-            ("sigma", "sigma"), ("omega", "omega")):
-        s = s.replace("\\" + name, plain)
-
     for tok in _LATEX_NOISE:
         s = s.replace(tok, "")
+
+    # Commands with an unambiguous plain form.
+    #
+    # This has to be one anchored regex, not a loop of ``str.replace``. A bare
+    # replace has no word boundary, so every command whose name merely *starts*
+    # with one of these lost its backslash: ``\left`` became ``<=ft`` because
+    # ``\le`` matched first, ``\gets`` became ``>=ts``, ``\newline`` became
+    # ``!=wline``. The result still looked like an answer, so the
+    # unresolved-command check below never fired and a fabricated vote went
+    # into the tally. ``(?![A-Za-z])`` is the whole fix, and it is why the
+    # ordering caveat that used to live here is no longer needed.
+    s = _PLAIN_FORM_RE.sub(lambda m: _PLAIN_FORM[m.group(1)], s)
 
     # Set braces are part of the answer: {1,2,3} is not (1,2,3), and {1} is not
     # 1. Protect them before the grouping braces go.
@@ -485,12 +509,20 @@ def normalise(answer: str) -> str:
 
     s = _strip_thousands(s)
 
-    # float() overflows to inf past about 1e308 and _numeric_key rejects
-    # non-finite values, so a 400-digit integer normalised to "" and abstained
-    # on an answer that was perfectly well formed. Digits are already exact.
+    # float() overflows to infinity past about 1e308 and _numeric_key rejects
+    # non-finite values, so a 400-digit integer -- exact as written -- used to
+    # normalise to "" and abstain.
+    #
+    # Canonicalised by hand rather than with ``int()``. CPython caps
+    # integer-from-string conversion at 4300 digits and raises above it, and
+    # this function sits behind ``Sample.key``: one pathological trajectory in
+    # a pool of 128 would take down select(), agreement() and effective_n()
+    # with an uncaught exception. That is strictly worse than the silent
+    # abstention it was meant to fix. Stripping leading zeros needs no int.
     digits = s[1:] if s[:1] == "-" else s
     if digits.isdigit():
-        return str(int(s))
+        stripped = digits.lstrip("0") or "0"
+        return ("-" + stripped) if s[:1] == "-" and stripped != "0" else stripped
 
     key = _numeric_key(s)
     if key is not None:

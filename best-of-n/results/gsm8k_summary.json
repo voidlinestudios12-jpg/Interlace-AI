@@ -1,22 +1,24 @@
 {
   "problems": 200,
   "n_generated": 128,
-  "per_trajectory_accuracy": 45.27,
+  "per_trajectory_accuracy": 45.34,
   "abstention_rate": 3.14,
   "truncation_rate": 0.84,
   "n_trajectories": 25600,
   "n_voting": 24797,
   "n_abstained": 803,
   "n_truncated": 216,
-  "n_abstained_not_truncated": 587,
+  "n_truncated_and_abstained": 215,
+  "n_truncated_but_voted": 1,
+  "n_abstained_not_truncated": 588,
   "total_tokens": 8434157,
   "curve": [
     {
       "n": 1,
-      "random": 45.03,
-      "majority": 45.03,
+      "random": 45.12,
+      "majority": 45.12,
       "coverage": 45.12,
-      "sd": 2.473,
+      "sd": 2.499,
       "majority_ci95": [
         39.0,
         52.0
@@ -24,10 +26,10 @@
     },
     {
       "n": 2,
-      "random": 45.96,
-      "majority": 46.4,
+      "random": 46.04,
+      "majority": 46.45,
       "coverage": 56.53,
-      "sd": 2.176,
+      "sd": 2.165,
       "majority_ci95": [
         38.0,
         51.5
@@ -35,21 +37,21 @@
     },
     {
       "n": 4,
-      "random": 46.46,
-      "majority": 53.02,
+      "random": 46.53,
+      "majority": 53.07,
       "coverage": 66.66,
-      "sd": 1.836,
+      "sd": 1.829,
       "majority_ci95": [
-        44.0,
-        57.0
+        44.5,
+        57.5
       ]
     },
     {
       "n": 8,
-      "random": 45.88,
-      "majority": 58.27,
+      "random": 45.96,
+      "majority": 58.31,
       "coverage": 75.01,
-      "sd": 1.696,
+      "sd": 1.682,
       "majority_ci95": [
         53.0,
         66.5
@@ -57,10 +59,10 @@
     },
     {
       "n": 16,
-      "random": 46.23,
-      "majority": 61.65,
+      "random": 46.32,
+      "majority": 61.7,
       "coverage": 81.67,
-      "sd": 1.397,
+      "sd": 1.399,
       "majority_ci95": [
         55.5,
         69.0
@@ -68,10 +70,10 @@
     },
     {
       "n": 32,
-      "random": 45.99,
-      "majority": 64.11,
+      "random": 46.07,
+      "majority": 64.14,
       "coverage": 86.74,
-      "sd": 1.272,
+      "sd": 1.27,
       "majority_ci95": [
         57.5,
         70.5
@@ -79,10 +81,10 @@
     },
     {
       "n": 64,
-      "random": 46.21,
+      "random": 46.3,
       "majority": 65.44,
       "coverage": 90.57,
-      "sd": 1.093,
+      "sd": 1.09,
       "majority_ci95": [
         59.0,
         72.0
@@ -90,7 +92,7 @@
     },
     {
       "n": 128,
-      "random": 46.31,
+      "random": 46.4,
       "majority": 66.5,
       "coverage": 93.5,
       "sd": 0.0,
@@ -115,13 +117,13 @@
   "selectors_at_n_max": [
     {
       "selector": "random",
-      "accuracy": 46.3,
+      "accuracy": 46.39,
       "ci95": [
         41.0,
         55.0
       ],
       "seeds": 200,
-      "sd_over_seeds": 2.46
+      "sd_over_seeds": 2.44
     },
     {
       "selector": "majority",

@@ -390,13 +390,19 @@ def select(samples: Sequence, method: str = "majority",
         g = normalise(gold)
         if not g:
             return ""
-        hit = next((s.key for s in items if s.key == g), None)
-        if hit is not None:
-            return hit
+        if any(s.key == g for s in items):
+            return g
         # Same equivalence rule coverage() uses. Having the two disagree meant
         # covered() said yes while the oracle selector said no.
-        return next((s.key for s in items
-                     if s.key and equivalent(s.answer, gold)), "")
+        #
+        # ``min``, not ``next``: several distinct canonical keys can each be
+        # equivalent to the gold answer -- a pool holding both ``2/4`` and
+        # ``0.5`` against a gold of ``\frac{1}{2}`` -- and taking the first one
+        # encountered made the result depend on the order of the pool. Every
+        # other selector here is permutation-invariant; this one was the
+        # exception, and the exception was undocumented.
+        return min((s.key for s in items
+                    if s.key and equivalent(s.answer, gold)), default="")
 
     if method == "random":
         pool = _voting(items)
@@ -432,7 +438,12 @@ def select(samples: Sequence, method: str = "majority",
         # resolved by whichever the model happened to emit first. Breaking on
         # the canonical key instead makes this independent of pool order, the
         # same way _winner does for the voting selectors.
-        return min(scored, key=lambda s: (-float(s.score), s.key)).key
+        # Through the merge map, like every other selector. Returning the
+        # raw key meant the same pool could answer "1/2" under argmax and
+        # "0.5" under verifier, and the caller compares against one gold.
+        argmax_merge = _merge_map([s.key for s in items if s.key])
+        best = min(scored, key=lambda s: (-float(s.score), s.key))
+        return argmax_merge.get(best.key, best.key)
 
     # Computed once and threaded through: it is quadratic in distinct answers
     # and each comparison runs a symbolic parser.

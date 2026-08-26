@@ -644,8 +644,13 @@ def _check_sampling(n, temperature, top_p=1.0, max_tokens=1,
         raise ValueError(f"n must be a whole number, got {n!r}")
     if n < 1:
         raise ValueError("n must be >= 1")
+    if temperature != temperature:      # NaN <= 0 is False, so it slipped past
+        raise ValueError("temperature must be a number, got nan")
     if not 0 < top_p <= 1:
         raise ValueError(f"top_p must be in (0, 1], got {top_p!r}")
+    if max_tokens != max_tokens or max_tokens in (float("inf"), float("-inf")):
+        # int(inf) raises OverflowError, not the ValueError we document.
+        raise ValueError(f"max_tokens must be finite, got {max_tokens!r}")
     if int(max_tokens) != max_tokens or max_tokens < 1:
         raise ValueError(
             f"max_tokens must be a positive whole number, got {max_tokens!r}")

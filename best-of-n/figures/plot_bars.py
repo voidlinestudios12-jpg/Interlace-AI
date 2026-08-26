@@ -65,8 +65,8 @@ gain = d["top"] - d["base"]
 selection = d["top"] - d["rnd_top"]
 fig.text(0.034, 0.108,
          "Of the +%.1f points over a single sample, +%.1f come from selection "
-         "itself. Exact McNemar vs random: p = %.1e."
-         % (gain, selection, d["p"]),
+         "itself. Exact McNemar vs random: p \u2264 %.0e at every one of %d "
+         "random seeds." % (gain, selection, d["p"], d["p_seeds"]),
          color=M.NOTA, fontsize=11.5, family=fam)
 fig.text(0.034, 0.075,
          "Coverage is what the model reaches somewhere in its %d attempts "

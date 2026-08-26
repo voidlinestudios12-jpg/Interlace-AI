@@ -1,9 +1,13 @@
 # Technical report
 
-**TR-2026-02 — *Best-of-N: Inference-Time Compute for Small Language Models***
-is the current report. It documents the measurements in
-[README.md](README.md), every one of which is re-derived from the published
-trajectories by `scripts/analyse.py`.
+**[TR-2026-02](TR-2026-02.md) — *Best-of-N: Inference-Time Compute for Small
+Language Models*** is the current report, and the full text is in this
+repository. It documents the measurements in [README.md](README.md), every one
+of which is re-derived from the published trajectories by
+`scripts/analyse.py`.
+
+The deposited version, with the trajectory dataset attached, is on Zenodo:
+[10.5281/zenodo.21936832](https://doi.org/10.5281/zenodo.21936832).
 
 It supersedes TR-2026-01 (`10.5281/zenodo.21936833`). That earlier report
 described measurements produced by version 1.0.0 of this library, which

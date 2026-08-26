@@ -312,6 +312,89 @@ if have_math_verify():
 else:
     _SKIPPED += 5
 
+
+print("\nPERMUTATION INVARIANCE  (every selector, fuzzed)")
+
+# The claim is that a fixed pool returns a fixed answer whatever order it
+# arrives in. It has three separate failure modes and each one shipped once:
+# a greedy equivalence partition, weights accumulated in arrival order (float
+# addition is not associative), and ties broken on first-seen. `oracle` had a
+# fourth -- it returned the first key equivalent to gold -- and no test could
+# see it, because the only coverage here was 60 shuffles of `majority`.
+import random as _rng_mod                                      # noqa: E402
+
+_ANSWERS = ["1/2", "0.5", "2/4", "7", "7.0", "1/3", "0.3333333333",
+            "0.33333333333333", "3", "11", "-2", "2.50", "5/2"]
+# A gold whose canonical form matches NO key in the pool, so the exact-match
+# branch cannot fire and the equivalence fallback is the code under test.
+# "2/4" would not do: normalise already reduces it to "1/2".
+_GOLD = "\\frac{1}{2}"
+
+
+def _fuzz_selector(name, trials=400, shuffles=6, kw=None):
+    """Return how many pools changed their answer when reordered."""
+    kw = kw or {}
+    rng = _rng_mod.Random(90210 + len(name))
+    moved = 0
+    for _ in range(trials):
+        pool = [Sample(rng.choice(_ANSWERS),
+                       logprob=-rng.random() * 3,
+                       score=round(rng.random(), 2))
+                for _ in range(rng.randint(2, 14))]
+        try:
+            base = select(pool, name, **kw)
+        except Exception:
+            continue
+        for k in range(shuffles):
+            shuffled = list(pool)
+            _rng_mod.Random(k).shuffle(shuffled)
+            try:
+                if select(shuffled, name, **kw) != base:
+                    moved += 1
+                    break
+            except Exception:
+                pass
+    return moved
+
+
+for _name, _kw in (("majority", None), ("self_certainty", None),
+                   ("verifier", None), ("verifier_argmax", None),
+                   ("oracle", {"gold": _GOLD})):
+    check("%s is invariant under permutation" % _name,
+          _fuzz_selector(_name, kw=_kw), 0)
+
+# The specific pool that falsified `oracle`: two distinct canonical keys both
+# equivalent to the gold, so whichever arrived first was returned.
+if have_math_verify():
+    # Two DISTINCT canonical keys, each equivalent to the gold, and the gold
+    # itself canonicalising to neither. Returning the first one encountered
+    # made the answer depend on pool order; this is the pool that showed it.
+    _both = [Sample("1/2"), Sample("0.5")]
+    _g = "\\frac{1}{2}"
+    check("oracle's two equivalent keys really are distinct",
+          normalise("1/2") != normalise("0.5") and normalise(_g) not in ("1/2", "0.5"),
+          True)
+    check("oracle does not depend on which equivalent key came first",
+          select(_both, "oracle", gold=_g),
+          select(list(reversed(_both)), "oracle", gold=_g))
+
+# Exact ties are the case max() and += both get wrong.
+_tied_scores = [Sample("7", score=0.5), Sample("3", score=0.5)]
+check("verifier_argmax breaks an exact tie the same way both ways",
+      select(_tied_scores, "verifier_argmax"),
+      select(list(reversed(_tied_scores)), "verifier_argmax"))
+
+_tied_lp = [Sample("7", logprob=-1.0), Sample("3", logprob=-1.0)]
+check("self_certainty breaks an exact tie the same way both ways",
+      select(_tied_lp, "self_certainty"),
+      select(list(reversed(_tied_lp)), "self_certainty"))
+
+# A pool past the merge cap falls back to exact matching; that path has to be
+# order-independent too.
+_big = [Sample("%d/17" % i) for i in range(1, 90)] + [Sample("7"), Sample("7")]
+check("a pool past the merge cap is still invariant",
+      len({select(_big[i:] + _big[:i], "majority") for i in (0, 17, 43, 88)}), 1)
+
 print(f"\n{'='*46}\n{passed} passed, {failed} failed\n{'='*46}")
 if __name__ == "__main__":
     sys.exit(1 if failed else 0)

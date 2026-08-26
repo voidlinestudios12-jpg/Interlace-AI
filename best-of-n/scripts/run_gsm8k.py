@@ -14,8 +14,13 @@ Each record carries, per trajectory:
     logprob        mean token log-probability under the model
     n_tokens       generated tokens
 
-plus the prompt, the sampling parameters, the seed and the library version, so
-the run is reproducible rather than merely reported.
+plus the prompt, the sampling parameters, the problem seed and the library
+version, so a reader can see exactly what produced the file rather than take a
+table's word for it.
+
+Note what that does not buy. Generation is not seeded: the seed fixes which
+200 problems are drawn, not which tokens come out. A rerun reproduces the
+distribution, not the trajectories.
 
 Resumable: interrupt it and run it again.
 
@@ -78,6 +83,9 @@ def load_problems(n_problems: int, seed: int):
 
 from bestofn import __version__ as _VERSION   # noqa: E402
 
+#: The seed that fixes WHICH problems are used. Set by main() from --seed.
+_PROBLEM_SEED = DEFAULTS["seed"]
+
 
 def record_for(k, item, res, engine):
     return {
@@ -96,6 +104,13 @@ def record_for(k, item, res, engine):
             "top_p": getattr(engine, "top_p", None),
             "max_tokens": getattr(engine, "max_tokens", None),
             "backend": engine.backend,
+            # The problem-selection seed. Generation itself is not seeded --
+            # vLLM and transformers both sample freshly -- so this fixes which
+            # 200 GSM8K problems were used, not which tokens came out. Saying
+            # so here is the point: a record that carried a seed and did not
+            # reproduce would be worse than one that carries none.
+            "problem_seed": _PROBLEM_SEED,
+            "generation_seeded": False,
             "logprobs": getattr(engine, "logprobs", None),
             "bestofn_version": _VERSION,
         },
@@ -143,6 +158,8 @@ def main():
     print(f"  problems     : {args.problems}")
     print(f"  n            : {args.n}")
     print(f"  max_tokens   : {args.max_tokens}")
+    global _PROBLEM_SEED
+    _PROBLEM_SEED = args.seed
     print(f"  temperature  : {args.temperature}   top_p: {args.top_p}")
     print(f"  seed         : {args.seed}")
     print(f"  backend      : {args.backend}   batch: {args.batch}")

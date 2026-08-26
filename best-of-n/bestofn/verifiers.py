@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import urllib.request
 import warnings
 from typing import Callable, Dict, List, Optional, Sequence
@@ -134,9 +135,25 @@ def license_of(model_id: str, timeout: float = 15.0) -> Optional[str]:
     return None
 
 
+#: Seconds to wait on the Hub when checking a licence at construction time.
+#: Building an adapter is documented as cheap, and a firewalled or offline box
+#: used to stall 15 seconds per call before finding that out. Set
+#: ``BESTOFN_NO_LICENCE_CHECK=1`` to skip the lookup entirely.
+_LICENCE_TIMEOUT = 3.0
+
+
 def _warn_licence(model_id: str) -> None:
-    """Tell the user what they are agreeing to, once, at load time."""
-    live = license_of(model_id)
+    """Tell the user what they are agreeing to, once, at load time.
+
+    The Hub lookup is best-effort and short. Building an adapter is documented
+    as cheap and GPU-free, and a 15-second call to a host that may be
+    unreachable does not fit that description: on a firewalled or offline
+    machine it stalled the constructor before falling back to the local table
+    anyway. Set ``BESTOFN_NO_LICENCE_CHECK=1`` to skip the network entirely and
+    rely on :data:`KNOWN_VERIFIERS`.
+    """
+    live = (None if os.environ.get("BESTOFN_NO_LICENCE_CHECK")
+            else license_of(model_id, timeout=_LICENCE_TIMEOUT))
     known = KNOWN_VERIFIERS.get(model_id, {})
     licence = live or known.get("licence") or "unknown"
     note = known.get("note", "")

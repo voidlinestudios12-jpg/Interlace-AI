@@ -64,7 +64,13 @@ def data():
     d["cov_top"] = c[-1]["coverage"]
     d["rnd_top"] = c[-1]["random"]
     d["n_top"] = c[-1]["n"]
-    d["p"] = d["mcnemar_majority_vs_random"]["p_value"]
+    # The worst of the seeds, not the one arbitrary draw. "p_value" is the
+    # single-seed figure kept for continuity; printing it on the two lead
+    # charts put a cherry-picked 1.2e-07 beside the README's honest 1.4e-05.
+    mc = d["mcnemar_majority_vs_random"]
+    d["p"] = mc.get("p_value_worst", mc["p_value"])
+    d["p_median"] = mc.get("p_value_median")
+    d["p_seeds"] = mc.get("seeds")
     d["trajectories"] = d["problems"] * d["n_generated"]
     return d
 

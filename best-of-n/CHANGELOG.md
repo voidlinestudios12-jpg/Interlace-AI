@@ -2,6 +2,108 @@
 
 All notable changes to `bestofn`.
 
+## 1.1.4 — 2026-08-25
+
+A third adversarial audit, run against 1.1.3. It reproduced 25 of 26 published
+numbers independently and the summary regenerates bit-identically — but it
+found two genuinely fatal defects in the extractor, **both of them introduced
+or left by the round-2 fixes**, and it caught three items the 1.1.3 changelog
+listed as closed that were not.
+
+### Fixed — extraction
+
+- **`\boxed{\left(5\right)}` voted as `<=ft(5)`.** The round-2 fix that added
+  plain forms for `\ge`, `\le` and friends used a bare `str.replace` with no
+  word boundary, so every command whose name merely *starts* with one of them
+  lost its backslash: `\left` → `<=ft`, `\gets` → `>=ts`, `\newline` →
+  `!=wline`. The mangled text no longer looked like a command, so the
+  unresolved-command check never fired and a fabricated answer went into the
+  tally — the exact failure that check exists to prevent, reintroduced by the
+  fix for it. It is now one anchored regex, longest name first, with
+  `(?![A-Za-z])`. Verified against a catalogue of 89 real LaTeX commands: none
+  fabricates a vote, and all 12 legitimate forms still vote.
+  Effect on the published GSM8K run: **none** — its answers are bare integers,
+  and no trajectory contained a colliding command. On a MATH-style corpus it
+  would have been serious.
+- **`normalise` raised instead of abstaining.** The round-2 fix for very large
+  integers called `int()`, and CPython refuses to convert a string of more than
+  4,300 digits. `normalise` sits behind `Sample.key`, so a single pathological
+  trajectory took down `select`, `agreement`, `effective_n` and `abstentions`
+  for the whole pool of 128 with an uncaught `ValueError`. Strictly worse than
+  the silent abstention it replaced. Canonicalised by string now; no `int()`.
+
+### Fixed — the invariance claim
+
+- **`oracle` was still order-dependent,** and the property was asserted for
+  every selector. When two distinct canonical keys are each equivalent to the
+  gold answer — a pool holding both `1/2` and `0.5` against a gold of
+  `\frac{1}{2}` — it returned whichever arrived first. Now the minimum by key.
+- **The claim had no test.** 1.1.3's changelog said "verified across 24,000
+  shuffles"; that was run by hand and never committed, and the only coverage in
+  the repository was 60 shuffles of `majority`. There is now a fuzz over all
+  five deterministic selectors, plus the specific pools that falsified `oracle`
+  and the two argmax tie cases, and the merge-cap fallback path. Confirmed to
+  fail when each bug is reintroduced.
+
+### Fixed — measurement
+
+- **One criterion for correctness.** `scripts/analyse.py` scored accuracy with
+  exact key equality while `coverage()` in the same table — and
+  `Result.is_correct`, which is what a reader will actually run — used symbolic
+  equivalence. The coverage column was therefore scored more generously than
+  the accuracy columns beside it. Everything now goes through one `hit()`
+  helper using the library's own rule. This moves the published figures by a
+  tenth of a point: single sample 45.0 → **45.1**, total gain 21.5 → **21.4**,
+  selection 20.2 → **20.1**. Majority (66.5%) and coverage (93.5%) are
+  unchanged.
+- **The abstention split was inferred, not counted.** Subtracting truncations
+  from abstentions assumes every truncated trajectory abstains. One did not —
+  it boxed its answer and then ran out of room — so the real split is **215
+  truncated-and-abstained plus 588 others**, not 216 + 587. Counted directly
+  now, and both halves are in the summary.
+- **The two lead figures still printed the cherry-picked p-value.** 1.1.3 moved
+  the text to the worst of 200 seeds but `figures/marca.py` was still reading
+  the single-seed field, so `07_curve_n128.png` and `08_bars_n128.png` showed
+  `p = 1.2e-07` beside a README saying `p ≤ 1.4e-05`. They read
+  `p_value_worst` now and say how many seeds it is the worst of.
+- **The skip count was reported before it finished counting.** Without
+  math-verify, pytest said "1 checks skipped" where six are. The notice now
+  runs after every gate.
+
+### Fixed — claims
+
+- `verifier_argmax` returned an unmerged key, so the same pool could answer
+  `1/2` under argmax and `0.5` under `verifier`.
+- The licence check blocked for up to 15 seconds at construction on an
+  unreachable host, in a constructor documented as cheap. Three seconds now,
+  and `BESTOFN_NO_LICENCE_CHECK=1` skips the network entirely.
+- The technical note claimed the published dataset records the sampling
+  parameters, seed and library version. It records the prompt suffix. That is
+  now stated plainly, along with the fact that generation is not seeded — the
+  run reproduces as a distribution, not token for token. `run_gsm8k.py` writes
+  the full configuration into every record from this release on.
+- The 1.1.3 changelog listed a fix for transient symbolic-backend failures
+  being memoised as permanent. Only an unused exception class was added;
+  nothing raises it. The entry has been withdrawn rather than left standing.
+- `matplotlib` was an undeclared import of `figures/make_figures.py`. It is now
+  the `[figures]` extra, and the README says which commands need which extra.
+- The technical note's abstract still claimed the coverage/selection
+  decomposition had not been reported elsewhere, while §1 of the same document
+  credited Snell et al. and the evaluation harnesses.
+- `USAGE.md` said per-trajectory accuracy is "exactly what random selection
+  gets you". It is not — random picks among trajectories that answered, so it
+  skips the abstentions and comes out about a point higher. That gap is the
+  whole "not the method" term the report is built on.
+- The README's selector table is headed for what it contains: `verifier` and
+  `verifier_argmax` cannot appear, because this release ships no reward model
+  and the published trajectories carry no scores.
+
+### Note on the numbers
+
+45.1% → 66.5% at N=128, coverage 93.5%, McNemar p ≤ 1.4 × 10⁻⁵ over 200 seeds.
+The only movement from 1.1.3 is the tenth of a point from unifying the
+correctness criterion. 187 tests.
+
 ## 1.1.3 — 2026-08-25
 
 A second adversarial audit, run against 1.1.2 immediately after its release.
@@ -70,16 +172,15 @@ are closed here.
   boxes with sharp corners. It is loaded from the PNG now and cannot be
   distorted.
 - **The abstention figure attributed all 803 abstentions to truncation.** Only
-  216 are; 587 are trajectories that finished normally without leaving a usable
+  215 are; 588 are trajectories that finished normally without leaving a usable
   answer. Exact counts are published in the summary so a figure never has to
   multiply a rounded percentage back out.
 - **The GitHub repository description** carried the 1.1.1 numbers under a
   changelog entry claiming it had been corrected.
-- Smaller: a transient symbolic-backend failure could be memoised as a
-  permanent "not equal"; `verifier_argmax` said nothing when every score was
-  zero while `verifier` warned; the vLLM terminal-token correction was skipped
-  in silence when the log-probability count did not match the token count; the
-  test suite's "no network" claim was untrue; `README_PYPI.md`'s relative links
+- Smaller: `verifier_argmax` said nothing when every score was zero while
+  `verifier` warned; the vLLM terminal-token correction was skipped in silence
+  when the log-probability count did not match the token count; the test
+  suite's "no network" claim was untrue; `README_PYPI.md`'s relative links
   resolved to the PyPI project page rather than to the files.
 
 ### Changed
@@ -107,7 +208,7 @@ are closed here.
 
 ### Note on the numbers
 
-The published GSM8K results are unchanged by all of this: 45.0% → 66.5% at
+The published GSM8K results are unchanged by all of this: 45.1% → 66.5% at
 N=128, coverage 93.5%. Two trajectories that had been voting with a mangled
 repeating decimal now abstain, which moves the abstention count from 801 to
 803 and nothing else.

@@ -109,8 +109,16 @@ saturates.
 | 20–60% | **the sweet spot** — this is where it pays |
 | over 80% | you are mostly paying N times for the same answer |
 
-Measure your own `p` first — it is the mean correctness across trajectories,
-and it is also exactly what random selection gets you:
+Measure your own `p` first — the mean correctness across trajectories. It is
+what a single sample gets you, and it is the number the whole curve is built
+on.
+
+It is *close to*, but not the same as, what `random` scores at large N. Random
+picks among the trajectories that produced an answer, so it skips the
+abstentions and comes out slightly higher: on our published run p is 45.3% and
+`random` at N=128 is 46.4%. That 1.1-point wedge is the "not the method" term
+in the decomposition below, and conflating the two is what makes it disappear
+from a report.
 
 ```python
 from bestofn import normalise
