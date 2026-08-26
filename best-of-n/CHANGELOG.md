@@ -2,6 +2,120 @@
 
 All notable changes to `bestofn`.
 
+## 1.1.5 — 2026-08-26
+
+A fourth adversarial audit. It found the two defects the previous release
+certified as closed **still present, one code block away from where they had
+been fixed** — and it found that two of the changelog entries certifying them
+cited verifications that did not exist in the repository.
+
+That pattern is the story of this release, so the fixes below are structural
+rather than local: the numbers in the documentation are now generated from the
+data, and the verifications the changelog claims are now committed tests that
+have been confirmed to fail when the bug is put back.
+
+### Fixed — the two that came back
+
+- **Prefix collisions, again.** 1.1.4 anchored `_PLAIN_FORM` with a word
+  boundary and left `_LATEX_NOISE` twenty lines above it as a bare
+  `str.replace` loop. `\left` is a prefix of `\leftarrow`, `\right` of
+  `\rightarrow`, `\rm` of `\rmoustache`: twenty real amsmath commands still
+  lost their backslash, stopped looking like commands, and voted.
+  `\boxed{\rightarrow}` became the ballot `ARROW`. Spacing commands were worse
+  — `\boxed{7\quad 3}` became the answer `73`, a number nobody wrote. Both
+  lists are anchored now, and spacing collapses to a sentinel that makes the
+  extractor abstain when it sits between two digits rather than letting them
+  fuse.
+- **`normalise` raising, again.** 1.1.4 removed `int()` from the integer branch
+  and left it in the fraction branch, so a 5,000-digit numerator still raised
+  and still took `select`, `agreement`, `effective_n` and `abstentions` down
+  with it for the entire pool. Both branches are string-canonicalised now, and
+  `tests/test_latex_catalogue.py` fuzzes 54 hostile inputs — `None`, non-str,
+  control characters, unicode digits, 1 MB strings, `1e999999` — through
+  `normalise` and through a poisoned 128-trajectory pool.
+
+### Fixed — the verifications that did not exist
+
+- **`tests/test_latex_catalogue.py`** is new: 217 real LaTeX commands, each in
+  three shapes, every one of which must make the extractor abstain, plus 20
+  legitimate forms that must still vote. Reintroducing the prefix bug turns up
+  54 fabricated votes and the suite goes red. The 1.1.4 changelog cited "a
+  catalogue of 89 real LaTeX commands"; that catalogue was run in a terminal
+  and never committed.
+- **The permutation fuzz could not see one of the four bugs it covers.**
+  Reintroducing `+=` accumulation left the suite at 117 passed, 0 failed,
+  because the fuzz drew weights of similar magnitude and the totals never
+  differed enough to cross another answer's. It now asserts on the weight
+  tally itself and draws weights spread over many orders of magnitude; the same
+  reintroduction now fails 134 pools. The 1.1.4 changelog said "confirmed to
+  fail when each bug is reintroduced" — true for three of four.
+- **`oracle` was still order-dependent**, and the test written for it in 1.1.4
+  could not detect that, because its example pool used `2/4` and `0.5` and
+  `normalise` already reduces `2/4` to `1/2`, so the exact-match branch fired
+  and the equivalence fallback under test never ran.
+
+### Fixed — the statistics
+
+- **The random baseline is computed, not sampled.** It has a closed form:
+  `random` picks among the trajectories that answered, so on one problem it is
+  right with probability (correct voters)/(voters). Two Monte-Carlo estimates
+  of that one number were being published side by side and disagreeing by a few
+  tenths, release after release. There is one number now, and it is exact:
+  **46.3%**.
+- **The N=1 row is computed too.** At N=1 the majority, random and coverage
+  columns are all "did the single drawn trajectory hit gold", whose expectation
+  is exactly the per-trajectory accuracy printed three lines above. Estimating
+  it by resampling gave a 0.17-point standard error, and the 45.0 → 45.1
+  movement between two releases was inside that noise. The single-sample
+  baseline is **45.3%**.
+- **`random` was drawing correlated samples.** `select(..., "random", seed=s)`
+  builds its RNG inside the call, so passing one seed for all 200 problems made
+  every problem draw from the same stream position — at seed 1, from the first
+  7% of every pool. The 200 "seeds" were 200 correlated draws. The seed now
+  mixes in the problem index.
+- **The p-value is no longer described as a bound.** It is the worst of the 200
+  seeds enumerated, which is a different claim: a wider sweep finds a worse
+  one. Published as **p ≤ 6.6 × 10⁻⁵ at every one of 200 seeds**, median
+  8.2 × 10⁻¹⁰.
+
+### Fixed — publication
+
+- **The live demo was still serving the withdrawn report.** The Space linked
+  from the GitHub landing page carried the AIME 2024 headline, the 53.3%
+  figure, the comparison to QwQ-32B and a trained verifier described as
+  shipping with the library — every one of them withdrawn in TR-2026-02. It
+  has been rebuilt against the GSM8K data, generated from the summary JSON, and
+  carries a correction notice naming what was retracted.
+- **`README_PYPI.md` is generated.** It was a manual copy of `README.md`, the
+  copy was skipped on one release, and the live PyPI page served the previous
+  version's numbers. `scripts/sync_docs.py` produces it now, and there is no
+  way to run the docs update and leave it behind.
+- **The documentation tables are generated.** Every published table lives
+  inside an `<!-- auto:NAME -->` marker and is rewritten from
+  `results/gsm8k_summary.json`. Four audits in a row found a table somewhere
+  carrying the previous release's figures; this removes the step where a human
+  copies a number between files.
+- **One owner per chart file.** A second copy of the chart scripts lived in the
+  brand folder, still reading the single-seed p-value, and would have
+  overwritten the good figures the moment anyone ran it.
+- The figures printed `p ≤ 1e-05` for a worst case of 1.401e-05 — `%.0e`
+  rounding turned a true statement into a false one.
+- The abstention chart split 803 into 216 + 588 = 804.
+- The skip-count notice reported 1 of 8, because it ran before two of the three
+  gates that increment the counter.
+- Coverage is described as a diagnostic ceiling everywhere now, including on
+  the two charts that called it "headroom a verifier can still claim" while the
+  technical note said the opposite.
+
+### Numbers
+
+45.3% → 66.5% at N=128. Coverage 93.5%. Random baseline 46.3%, exact. Of the
+21.2-point gain, **20.2 points — 95% — is genuine selection**. 224 tests.
+
+The movement from 1.1.4 is entirely the two computed baselines replacing
+Monte-Carlo estimates of themselves; majority accuracy and coverage are
+unchanged, as they have been since the token budget was corrected in 1.1.2.
+
 ## 1.1.4 — 2026-08-25
 
 A third adversarial audit, run against 1.1.3. It reproduced 25 of 26 published

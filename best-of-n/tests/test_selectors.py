@@ -267,10 +267,19 @@ else:
     _SKIPPED += 1
 
 # --- M7: say so when the symbolic layer is absent --------------------------
-# A bare print is swallowed by pytest, so the previous version of this notice
-# was invisible in exactly the run that needed it. Go through warnings, which
-# pytest collects and displays in its summary.
-if not have_math_verify():
+# Two things this notice has got wrong before, both fixed here.
+#
+# It used to be a bare ``print``, which pytest captures and never shows -- so
+# it was invisible in exactly the run that needed it. It goes through
+# ``warnings`` now, which pytest collects into its summary.
+#
+# And it used to run *here*, at the point in the file where it is written,
+# which is before two of the three gates that increment the counter. It
+# therefore reported "1 checks skipped" when eight are. Counting is only
+# finished once the module is, so the report is deferred to the end.
+def _report_skips():
+    if have_math_verify():
+        return
     import warnings as _w                       # noqa: E402
     _w.warn(
         "math-verify is not installed, so %d symbolic-equivalence checks were "
@@ -321,6 +330,7 @@ print("\nPERMUTATION INVARIANCE  (every selector, fuzzed)")
 # addition is not associative), and ties broken on first-seen. `oracle` had a
 # fourth -- it returned the first key equivalent to gold -- and no test could
 # see it, because the only coverage here was 60 shuffles of `majority`.
+import itertools as _itertools                                 # noqa: E402
 import random as _rng_mod                                      # noqa: E402
 
 _ANSWERS = ["1/2", "0.5", "2/4", "7", "7.0", "1/3", "0.3333333333",
@@ -363,12 +373,53 @@ for _name, _kw in (("majority", None), ("self_certainty", None),
     check("%s is invariant under permutation" % _name,
           _fuzz_selector(_name, kw=_kw), 0)
 
+# Asserting only on the returned answer is not enough, and this is the second
+# time that has bitten. Weights accumulated in arrival order differ in the last
+# bits on 74% of pools, but the answer only moves when the difference is large
+# enough to cross another answer's total -- so a fuzz over similar-magnitude
+# weights passes with the bug present. Assert on the tally itself, which is
+# where the non-associativity actually lives.
+from bestofn.select import _tally                              # noqa: E402
+
+
+def _tally_moves(trials=300):
+    """Pools whose weight dictionary changes when the pool is reordered."""
+    rng = _rng_mod.Random(4242)
+    moved = 0
+    for _ in range(trials):
+        # Deliberately spread over many orders of magnitude: that is what makes
+        # (a+b)+c differ from a+(b+c) by more than a rounding artefact.
+        pool = [Sample(rng.choice(["7", "3", "11"]),
+                       score=rng.choice([0.5, 3e-17, 1e-9, 1.0, 7e-13]))
+                for _ in range(rng.randint(3, 10))]
+        base = _tally(pool, lambda x: float(x.score))
+        for k in range(8):
+            shuffled = list(pool)
+            _rng_mod.Random(k).shuffle(shuffled)
+            if _tally(shuffled, lambda x: float(x.score)) != base:
+                moved += 1
+                break
+    return moved
+
+
+check("the weight tally itself is invariant under permutation",
+      _tally_moves(), 0)
+
+# The minimal pool that flipped the winner under `+=`, kept as a named case so
+# a future reader can see the shape of it rather than trust the fuzz.
+_spread = [Sample("7", score=0.5), Sample("7", score=3e-17),
+           Sample("7", score=3e-17), Sample("3", score=0.5)]
+check("a magnitude-spread pool returns one answer under every permutation",
+      len({select(list(p), "verifier")
+           for p in _itertools.permutations(_spread)}), 1)
+
 # The specific pool that falsified `oracle`: two distinct canonical keys both
 # equivalent to the gold, so whichever arrived first was returned.
 if have_math_verify():
     # Two DISTINCT canonical keys, each equivalent to the gold, and the gold
     # itself canonicalising to neither. Returning the first one encountered
     # made the answer depend on pool order; this is the pool that showed it.
+    _SKIPPED += 0            # the two checks below are counted in the else
     _both = [Sample("1/2"), Sample("0.5")]
     _g = "\\frac{1}{2}"
     check("oracle's two equivalent keys really are distinct",
@@ -377,6 +428,8 @@ if have_math_verify():
     check("oracle does not depend on which equivalent key came first",
           select(_both, "oracle", gold=_g),
           select(list(reversed(_both)), "oracle", gold=_g))
+else:
+    _SKIPPED += 2            # the two oracle-equivalence checks above
 
 # Exact ties are the case max() and += both get wrong.
 _tied_scores = [Sample("7", score=0.5), Sample("3", score=0.5)]
@@ -395,6 +448,7 @@ _big = [Sample("%d/17" % i) for i in range(1, 90)] + [Sample("7"), Sample("7")]
 check("a pool past the merge cap is still invariant",
       len({select(_big[i:] + _big[:i], "majority") for i in (0, 17, 43, 88)}), 1)
 
+_report_skips()
 print(f"\n{'='*46}\n{passed} passed, {failed} failed\n{'='*46}")
 if __name__ == "__main__":
     sys.exit(1 if failed else 0)

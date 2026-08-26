@@ -61,9 +61,9 @@ r.covered(gold)      # was it reachable at all?
 
 | | single sample | **Best-of-128** |
 |---|---:|---:|
-| **GSM8K**, Qwen2.5-0.5B frozen | 45.0% | **66.5%** |
+| **GSM8K**, Qwen2.5-0.5B frozen | 45.3% | **66.5%** |
 
-**+21.5 points, and the weights were never touched.**
+**+21.2 points, and the weights were never touched.**
 
 </div>
 

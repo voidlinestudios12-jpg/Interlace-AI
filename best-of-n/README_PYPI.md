@@ -1,7 +1,5 @@
-<!-- Generated from README.md at release time. PyPI does not read the
-     Hugging Face YAML header and renders it as raw text, and relative
-     links resolve to the PyPI project page rather than to the files,
-     so both are rewritten here. Edit README.md, not this. -->
+<!-- GENERATED from README.md by scripts/sync_docs.py.
+     Do not edit: changes are overwritten on the next sync. -->
 
 
 <div align="center">
@@ -17,7 +15,7 @@
 [![PyPI](https://img.shields.io/pypi/v/bestofn?color=blue)](https://pypi.org/project/bestofn/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21936832.svg)](https://doi.org/10.5281/zenodo.21936832)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green)](https://github.com/voidlinestudios12-jpg/Interlace-AI/blob/main/best-of-n/LICENSE)
-[![Tests](https://img.shields.io/badge/tests-177%20passing-brightgreen)](https://github.com/voidlinestudios12-jpg/Interlace-AI/blob/main/best-of-n/tests/test_selectors.py)
+[![Tests](https://img.shields.io/badge/tests-224%20passing-brightgreen)](https://github.com/voidlinestudios12-jpg/Interlace-AI/blob/main/best-of-n/tests/test_selectors.py)
 [![Reproducible](https://img.shields.io/badge/every%20figure-reproducible%20in%202%20min-blueviolet)](https://github.com/voidlinestudios12-jpg/Interlace-AI/blob/main/best-of-n/results/)
 
 ```bash
@@ -44,11 +42,13 @@ than once.
 
 <div align="center">
 
+<!-- auto:headline -->
 | | single sample | **Best-of-128** |
 |---|---:|---:|
-| **GSM8K**, Qwen2.5-0.5B frozen | 45.0% | **66.5%** |
+| **GSM8K**, Qwen2.5-0.5B frozen | 45.3% | **66.5%** |
 
-**+21.5 points. Nothing was trained.**
+**+21.2 points. Nothing was trained.**
+<!-- /auto:headline -->
 
 </div>
 
@@ -106,24 +106,27 @@ weights frozen. Every figure is recomputed from the published trajectories by
 
 ![GSM8K accuracy against N](https://huggingface.co/InterlaceAI/best-of-n/resolve/main/figures/07_curve_n128.png)
 
+<!-- auto:curve -->
 | N | random | majority | 95% CI | coverage |
 |---:|---:|---:|---:|---:|
-| 1 | 45.0% | 45.0% | [39.0, 52.0] | 45.1% |
-| 4 | 46.5% | 53.0% | [44.0, 57.0] | 66.7% |
-| 8 | 45.9% | 58.3% | [53.0, 66.5] | 75.0% |
-| 16 | 46.2% | 61.6% | [55.5, 69.0] | 81.7% |
-| 32 | 46.0% | 64.1% | [57.5, 70.5] | 86.7% |
-| 64 | 46.2% | 65.4% | [59.0, 72.0] | 90.6% |
+| 1 | 45.3% | 45.3% | [44.7, 45.9] | 45.3% |
+| 2 | 46.4% | 46.5% | [37.0, 50.5] | 56.9% |
+| 4 | 46.1% | 53.0% | [45.0, 58.5] | 66.4% |
+| 8 | 46.2% | 58.3% | [52.0, 65.5] | 75.0% |
+| 16 | 46.1% | 61.8% | [55.0, 68.0] | 81.7% |
+| 32 | 46.5% | 64.0% | [56.0, 69.0] | 86.8% |
+| 64 | 46.1% | 65.5% | [58.5, 72.0] | 90.6% |
 | **128** | 46.3% | **66.5%** | [60.5, 73.0] | **93.5%** |
+<!-- /auto:curve -->
 
-**45.0% to 66.5%** on a half-billion-parameter model, with the weights frozen
-throughout. Against random selection at the same N, exact McNemar gives
-**p ≤ 1.4 × 10⁻⁵**, and the median across 200 random seeds is 1.5 × 10⁻⁹.
+**45.3% to 66.5%** on a half-billion-parameter model, with the weights
+frozen throughout. Against random selection at the same N, exact McNemar gives
+**p ≤ 6.6 × 10⁻⁵** at every one of 200 random seeds, with a median of 8.2 × 10⁻¹⁰.
 
-We quote the worst seed rather than the best. `random` draws a different
-trajectory every time you run it, so a p-value taken from one seed is partly a
-property of that seed: ours ranged from 2 × 10⁻¹⁴ to 1.4 × 10⁻⁵ depending on
-which one we picked. The conclusion holds at every one of them.
+We quote the worst seed rather than the best, and we say what it is: the worst
+of the 200 we enumerated, not a bound. `random` draws differently on every run,
+so its p-value has a distribution and a wider sweep will find a worse seed. The
+conclusion is what does not move — significant at all 200.
 
 And **coverage reaches 93.5%**: on more than nine problems out of ten, this
 small model does find the right answer somewhere in its 128 attempts. That is
@@ -136,14 +139,18 @@ means anything:
 
 | | | |
 |---|---:|---:|
-| N=1, a single sample | 45.0% | |
-| N=128, **random** among the trajectories that answered | 46.3% | +1.3 |
+<!-- auto:decomposition -->
+| | | |
+|---|---:|---:|
+| N=1, a single sample | 45.3% | |
+| N=128, **random** among the trajectories that answered | 46.3% | +1.0 |
 | N=128, **majority vote** | 66.5% | **+20.2** |
-| | | **+21.5 total** |
+| | | **+21.2 total** |
+<!-- /auto:decomposition -->
 
 Random selection improves slightly with N without selecting anything, because
 with more trajectories one of them usually did not abstain. Separating the two
-shows that **20.2 of the 21.5 points — 94% of the gain — is genuine
+shows that **20.2 of the 21.2 points — 95% of the gain — is genuine
 selection**, not an artefact of comparing a one-sample baseline against an
 N-sample system.
 
@@ -153,25 +160,35 @@ is small. It is small *because* the token budget lets trajectories finish; at a
 tighter budget the same experiment would have credited five times as much of
 the gain to the method.
 
-### Every selector, against the baseline
+### The selectors we can measure here, against the baseline
 
+<!-- auto:selectors -->
 | selector at N=128 | accuracy | 95% CI |
 |---|---:|---:|
-| `random` (mean of 200 seeds, sd 2.5) | 46.3% | [41.0, 55.0] |
+| `random` (exact expectation) | 46.3% | [38.0, 52.0] |
 | `majority` | **66.5%** | [60.5, 73.0] |
 | `self_certainty` | 66.5% | [60.5, 73.0] |
 | `oracle` (diagnostic ceiling) | 93.5% | [90.0, 96.5] |
+<!-- /auto:selectors -->
+
+`verifier` and `verifier_argmax` are absent because the published trajectories
+carry no reward-model scores — this release ships no reward model, so there was
+nothing to score them with. Plug one in and the same table prints them.
 
 ### The accounting
 
 | | |
 |---|---|
+<!-- auto:accounting -->
+| | |
+|---|---|
 | Trajectories generated | 25,600 |
 | Cast a vote | 24,797 — 96.9% |
-| Truncated at the token limit | 216 — 0.8% |
+| Abstained | 803 — 3.1% |
+| Truncated at the token limit | 216 — 0.8% (215 of them abstained) |
 | Tokens generated | 8,434,157 |
 | Re-extraction drift on replay | **0** |
-| Generated on | one RTX 3090, vLLM backend, ~25 minutes |
+<!-- /auto:accounting -->
 
 All 25,600 trajectories are published in full.
 
@@ -236,12 +253,17 @@ with `math.fsum` over a sorted list, which is exactly rounded.
 **Ties cannot break on whichever came first.** Every tie, in every selector,
 resolves on the canonical key.
 
-We check it two ways. Directly: shuffling all 200 published pools eight times
-each moves **no** returned answer. And visibly, in the output — at N=128 the
-resampled curve draws 128 trajectories from a pool of 128, so every draw is a
-permutation of one pool and the reported spread is **0.00**. That second one is
-a necessary condition rather than a proof, which is why the shuffle test exists
-too.
+We check it in the test suite, not by hand. `tests/test_selectors.py` fuzzes
+all five deterministic selectors over pools built to hit the cases that break
+invariance — exact ties, duplicate scores, weights spread across many orders of
+magnitude, and pools past the merge cap — and separately asserts that the
+weight tally itself is unchanged by reordering. Each of the four historical
+bugs has been confirmed to turn that suite red when reintroduced.
+
+It is visible in the published output too: at N=128 the resampled curve draws
+128 trajectories from a pool of 128, so every draw is a permutation of one pool
+and the reported spread is **0.00**. That is a necessary condition rather than
+a proof, which is why the tests carry the weight.
 
 ---
 
@@ -300,8 +322,15 @@ live. The full table is in [USAGE.md](https://github.com/voidlinestudios12-jpg/I
 ## Everything here is checkable
 
 ```bash
+pip install "bestofn[math]"
 python scripts/analyse.py     # no GPU needed
 ```
+
+The `[math]` extra pulls in `math-verify`, which is what makes `1/2`, `0.5` and
+`\frac{1}{2}` count as one answer. Without it the script still runs and still
+reports, but equivalent answers written differently vote separately and the
+numbers come out slightly lower. Regenerating the figures additionally needs
+`matplotlib`; the analysis itself does not.
 
 The published dataset contains the **complete reasoning text** of every
 trajectory, with `finish_reason`, log-probabilities and token counts — not

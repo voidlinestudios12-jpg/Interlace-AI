@@ -81,13 +81,34 @@ def have_math_verify() -> bool:
 
 # ------------------------------------------------------------ LaTeX cleaning
 
-#: Purely decorative tokens. Note what is NOT here: commas, spaces, braces and
-#: parentheses, all of which carry meaning that deleting them would destroy.
-_LATEX_NOISE = (
-    r"\left", r"\right", r"\!", r"\,", r"\;", r"\:", r"\ ",
-    r"\$", r"\%", r"\quad", r"\qquad", r"\displaystyle", r"\rm",
-    "$", "%",
+#: Decorative *word* commands: alphabetic names that carry no value. Every one
+#: of these is also a prefix of some real command -- ``\left`` of
+#: ``\leftarrow``, ``\rm`` of ``\rmoustache``, ``\quad`` of nothing today but
+#: of whatever amsmath adds tomorrow -- so they must only ever be matched with
+#: a trailing ``(?![A-Za-z])``. Deleting a prefix leaves a fragment that no
+#: longer looks like a command, which is how ``\rightarrow`` became the vote
+#: ``arrow``.
+_NOISE_WORDS = ("displaystyle", "textstyle", "scriptstyle", "qquad", "quad",
+                "right", "left", "rm", "mathrm", "bf", "it")
+
+#: Decorative *symbol* commands and bare glyphs. These end in punctuation, so
+#: no command name can extend them and a plain replace is safe.
+_NOISE_SYMBOLS = (r"\!", r"\,", r"\;", r"\:", r"\ ", r"\$", r"\%", "$", "%")
+
+#: A space is not nothing. ``\quad`` and its relatives separate two things, and
+#: deleting one outright fused ``7\quad 3`` into the answer ``73`` -- a
+#: fabricated number, not a lost one. They collapse to a separator that
+#: survives to the end, where it either disappears between non-digits or blocks
+#: the fusion between digits.
+_GAP = chr(0xE002)
+
+_NOISE_WORDS_RE = re.compile(
+    r"\\(?:" + "|".join(sorted(_NOISE_WORDS, key=len, reverse=True))
+    + r")(?![A-Za-z])"
 )
+# Whitespace is not stripped until the end, so the sentinel usually has
+# a real space beside it when this runs.
+_GAP_FUSES_DIGITS = re.compile(r"[0-9]\s*" + _GAP + r"\s*[0-9]")
 
 #: 1,000 or 1{,}000 -> 1000, but only when the commas really do group digits.
 _THOUSANDS = re.compile(r"^(-?\d{1,3})((?:\{?,\}?\d{3})+)(\.\d+)?$")
@@ -119,6 +140,10 @@ _LB, _RB = "\ue000", "\ue001"
 _UNRESOLVED = re.compile(r"\\(?:[dt]?frac|sqrt)|(?:frac|sqrt)(?=[^(a-zA-Z]|$)")
 
 _MAX_NESTING = 24
+
+#: Digits past which CPython refuses to build an int from a string. Kept below
+#: the interpreter limit so the margin does not depend on it being at default.
+_MAX_INT_DIGITS = 4000
 
 #: A LaTeX command still present after every rewrite above has run. It cannot
 #: be canonicalised, and stripping the backslash produces a plausible-looking
@@ -226,8 +251,14 @@ def _latex_to_text(s: str) -> Optional[str]:
     s = re.sub(r"\^(-?\w)", r"**\1", s)
     s = re.sub(r"_\s*\{([^{}]*)\}", r"_\1", s)
 
-    for tok in _LATEX_NOISE:
-        s = s.replace(tok, "")
+    # Word commands, anchored. A bare replace deletes the backslash off any
+    # longer command that merely starts with one of these, and the remnant --
+    # "arrow" out of "\\rightarrow" -- no longer looks like a command, so the
+    # unresolved-command check below waves it through as a vote.
+    s = _NOISE_WORDS_RE.sub(_GAP, s)
+    for tok in _NOISE_SYMBOLS:
+        s = s.replace(tok, _GAP if tok in (r"\!", r"\,", r"\;", r"\:", r"\ ")
+                      else "")
 
     # Commands with an unambiguous plain form.
     #
@@ -256,6 +287,13 @@ def _latex_to_text(s: str) -> Optional[str]:
     # accident.
     if _LEFTOVER_COMMAND.search(s):
         return None
+
+    # Two digits that were only ever separated by a spacing command are two
+    # numbers, not one. Joining them manufactures an answer -- "7 \\quad 3"
+    # became "73" -- so abstain rather than guess which was meant.
+    if _GAP_FUSES_DIGITS.search(s):
+        return None
+    s = s.replace(_GAP, "")
 
     s = s.replace("\\", "").replace("{", "").replace("}", "")
     s = s.replace(_LB, "{").replace(_RB, "}")
@@ -530,6 +568,14 @@ def normalise(answer: str) -> str:
 
     m = _FRACTION.match(s)
     if m:
+        # Guarded. CPython refuses int() on a string of more than 4300 digits,
+        # and this function sits behind Sample.key: one pathological answer in
+        # a pool of 128 raised out of select(), agreement() and effective_n().
+        # The integer branch above was fixed for exactly this in the previous
+        # release and this branch was missed, so the fatal defect survived one
+        # code block over. Nothing in normalise may raise.
+        if max(len(m.group(1)), len(m.group(2))) > _MAX_INT_DIGITS:
+            return re.sub(r"\s+", "", s)
         num, den = int(m.group(1)), int(m.group(2))
         if den == 0:
             return ""

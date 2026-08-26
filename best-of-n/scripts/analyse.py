@@ -58,6 +58,42 @@ from bestofn.extract import equivalent                       # noqa: E402
 from bestofn.select import merge_cap_hits                    # noqa: E402
 
 
+def exact_random(samples, golds) -> float:
+    """Closed-form accuracy of picking uniformly among the voters.
+
+    ``random`` chooses among the trajectories that produced an answer, so on
+    one problem it is right with probability (correct voters)/(voters), and
+    over problems the baseline is the mean of that. A problem where everything
+    abstained contributes zero, because the selector returns nothing.
+
+    Computed rather than sampled. Two Monte-Carlo estimates of this same number
+    were being published side by side and disagreeing by a few tenths, which is
+    both avoidable and exactly the kind of discrepancy this report exists to
+    catch in other people's work.
+    """
+    total = 0.0
+    for pool, g in zip(samples, golds):
+        voters = [x for x in pool if x.key]
+        if not voters:
+            continue
+        total += sum(1 for x in voters if hit(x.key, g)) / len(voters)
+    return 100.0 * total / len(golds)
+
+
+def rseed(seed: int, problem: int) -> int:
+    """A distinct random-selection seed for each (replicate, problem) pair.
+
+    ``select(..., "random", seed=s)`` constructs ``random.Random(s)`` inside
+    the call, so passing the same ``s`` for every problem makes all 200 draw
+    from the same stream position. At seed 1 that meant picking from the first
+    7% of every pool. The draws were correlated across problems, which both
+    inflated the reported spread and made the seed sweep a poor exploration of
+    what `random` can do. Mixing the problem index in fixes it while keeping
+    the whole thing reproducible.
+    """
+    return (seed * 1_000_003 + problem * 9_176_411) % (2 ** 31 - 1)
+
+
 def hit(answer, gold) -> bool:
     """Whether a returned answer counts as correct.
 
@@ -216,12 +252,33 @@ def main():
     rng = random.Random(SEED)
     curve = []
     for n in CURVE:
+        if n == 1:
+            # Exact, not estimated. At N=1 majority, random and coverage are
+            # all "did the single drawn trajectory hit gold", whose expectation
+            # over a uniform draw is precisely the per-trajectory accuracy
+            # computed above. Resampling it 200 times produced an estimate with
+            # a 0.17-point standard error, and that noise was propagating into
+            # the headline decomposition -- the 45.0-to-45.1 movement between
+            # two releases was inside it.
+            e = round(100 * p_bar, 2)
+            one1 = [1.0 if any(hit(x.key, g) for x in s[:1]) else 0.0
+                    for s, g in zip(samples, golds)]
+            lo1, hi1 = bootstrap_ci([1.0 if hit(x.key, g) else 0.0
+                                     for s, g in zip(samples, golds)
+                                     for x in s])
+            curve.append({"n": 1, "random": e, "majority": e, "coverage": e,
+                          "sd": 0.0, "majority_ci95": [round(lo1, 2),
+                                                       round(hi1, 2)],
+                          "exact": True})
+            print(f"  {1:>3}  {e:>10.1f}%  {e:>10.1f}%  "
+                  f"[{lo1:.1f}, {hi1:.1f}]  {e:>10.1f}%  exact")
+            continue
         if n > n_max:
             continue
         rnd_hits, maj_hits, cov_hits, sigmas = [], [], [], []
         for rep in range(RESAMPLES):
             r_ok = m_ok = c_ok = 0
-            for s, g in zip(samples, golds):
+            for _i, (s, g) in enumerate(zip(samples, golds)):
                 draw = rng.sample(s, n)
                 # Go through the library's own selectors rather than
                 # reimplementing the vote here. A published curve that bypasses
@@ -229,7 +286,7 @@ def main():
                 # and can drift from what users actually get.
                 if hit(select(draw, "majority"), g):
                     m_ok += 1
-                if hit(select(draw, "random", seed=rep), g):
+                if hit(select(draw, "random", seed=rseed(rep, _i)), g):
                     r_ok += 1
                 if coverage(draw, g):
                     c_ok += 1
@@ -240,6 +297,10 @@ def main():
 
         rnd, maj, cov = (100 * statistics.fmean(x)
                          for x in (rnd_hits, maj_hits, cov_hits))
+        if n == n_max:
+            # Every draw at full N is a permutation of the whole pool, so the
+            # resampled mean is estimating a quantity we can just compute.
+            rnd = exact_random(samples, golds)
         sd = 100 * statistics.pstdev(sigmas)
         # Confidence interval over problems, from one representative draw --
         # the resample spread (sd) and the sampling error over problems are
@@ -294,7 +355,8 @@ def main():
     # though it were a fixed quantity does not.
     trials = []
     for sd in range(P_SEEDS):
-        rnd_pick = [select(s, "random", seed=sd) for s in samples]
+        rnd_pick = [select(s, "random", seed=rseed(sd, i))
+                    for i, s in enumerate(samples)]
         a = sum(1 for m, r, g in zip(maj_pick, rnd_pick, golds)
                 if hit(m, g) and not hit(r, g))
         b = sum(1 for m, r, g in zip(maj_pick, rnd_pick, golds)
@@ -306,8 +368,8 @@ def main():
     p_best = trials[0][0]
 
     full = [(m, r, g) for m, r, g in
-            zip(maj_pick, [select(s, "random", seed=SEED) for s in samples],
-                golds)]
+            zip(maj_pick, [select(s, "random", seed=rseed(SEED, i))
+                           for i, s in enumerate(samples)], golds)]
     maj_only = sum(1 for m, r, g in full if hit(m, g) and not hit(r, g))
     rnd_only = sum(1 for m, r, g in full if hit(r, g) and not hit(m, g))
     p = mcnemar_exact(maj_only, rnd_only)
@@ -318,9 +380,11 @@ def main():
           f"p = {p_worst:.3g}")
     print(f"    best     : p = {p_best:.3g}")
     print(f"    {'significant at every seed' if p_worst < 0.05 else 'NOT significant at some seed'}")
-    print(f"\n    The number to quote is the worst case, p = {p_worst:.3g}.")
-    print(f"    A single seed gave {p:.3g}; across seeds the value moves by")
-    print(f"    orders of magnitude while the conclusion does not.")
+    print(f"\n    Quote p <= {p_worst:.3g}, and say what it is: the worst of")
+    print(f"    the {P_SEEDS} seeds enumerated here, not a bound. `random` is a")
+    print(f"    different draw every time, so the p-value has a distribution;")
+    print(f"    a wider sweep finds a worse seed. A single seed gave {p:.3g}.")
+    print(f"    What does not move is the conclusion: significant at all {P_SEEDS}.")
 
     # -------------------------------------------- every selector vs random
     print("\n" + "=" * 74)
@@ -334,22 +398,28 @@ def main():
             # of `random` landed on 47.5% where the mean is 46.4% -- half a
             # standard deviation out, and it was published beside the curve's
             # own 46.3% as though the two were the same quantity.
+            # Exact, and the same value the curve reports at this N. The
+            # spread over seeds is still worth printing -- it says how much a
+            # single run of `random` can flatter or embarrass you -- but the
+            # number in the table is not an estimate any more.
             per_seed = []
             for sd in range(P_SEEDS):
-                pick = [select(sm, "random", seed=sd) for sm in samples]
+                pick = [select(sm, "random", seed=rseed(sd, i))
+                        for i, sm in enumerate(samples)]
                 per_seed.append(statistics.fmean(
                     [1.0 if hit(a, g) else 0.0 for a, g in zip(pick, golds)]))
-            acc = 100 * statistics.fmean(per_seed)
+            acc = exact_random(samples, golds)
             sd_seeds = 100 * statistics.pstdev(per_seed)
             hits01 = [1.0 if hit(a, g) else 0.0 for a, g in
-                      zip([select(sm, "random", seed=SEED) for sm in samples],
-                          golds)]
+                      zip([select(sm, "random", seed=rseed(SEED, i))
+                           for i, sm in enumerate(samples)], golds)]
             clo, chi = bootstrap_ci(hits01)
             rows.append({"selector": name, "accuracy": round(acc, 2),
                          "ci95": [round(clo, 2), round(chi, 2)],
-                         "seeds": P_SEEDS, "sd_over_seeds": round(sd_seeds, 2)})
+                         "exact": True, "seeds": P_SEEDS,
+                         "sd_over_seeds": round(sd_seeds, 2)})
             print("  %-16s %6.1f%%   95%% CI [%.1f, %.1f]   "
-                  "(mean of %d seeds, sd %.1f)"
+                  "(exact; one run of %d seeds varies by sd %.1f)"
                   % (name, acc, clo, chi, P_SEEDS, sd_seeds))
             continue
         if name == "oracle":

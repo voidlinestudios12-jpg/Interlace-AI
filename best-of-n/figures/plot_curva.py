@@ -95,7 +95,7 @@ y -= 0.105
 
 pan.text(0, y, "exact McNemar vs random", color=M.TENUE, fontsize=11,
          family=fam, va="center")
-pan.text(1, y, "p \u2264 %.0e" % d["p"], color=M.VERDE, fontsize=13,
+pan.text(1, y, "p \u2264 %.1e" % d["p"], color=M.VERDE, fontsize=13,
          fontweight="bold", family=fam, ha="right", va="center")
 y -= 0.062
 pan.text(0, y, "worst of %d random seeds" % d["p_seeds"], color=M.NOTA,

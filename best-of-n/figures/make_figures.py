@@ -146,7 +146,10 @@ def fig_accounting(d):
     total = d.get("n_trajectories", d["problems"] * d["n_generated"])
     voted = 100.0 - d["abstention_rate"]
     n_abs = d.get("n_abstained")
-    n_tr = d.get("n_truncated")
+    # The truncated-AND-abstained count, not the truncated count: one
+    # truncated trajectory boxed its answer before running out of room,
+    # so using the latter made the chart sum to 804 out of 803.
+    n_tr = d.get("n_truncated_and_abstained", d.get("n_truncated"))
     n_un = d.get("n_abstained_not_truncated")
     fig, ax = plt.subplots(figsize=(8.6, 2.6))
     ax.barh([0], [voted], color=GOOD, height=0.42, zorder=3)
@@ -195,7 +198,7 @@ def fig_headroom(d):
                     alpha=0.16, linewidth=0, label="Still on the table")
     ax.plot(ns, [r["coverage"] for r in c], "--", color=CEIL, lw=2.2)
     ax.plot(ns, maj, "-", color=ACCENT, lw=3, marker="o", ms=6)
-    ax.annotate("%.1f points a better selector could still take"
+    ax.annotate("%.1f points between what came back and what was reachable"
                 % gap[-1], (ns[-1], (maj[-1] + c[-1]["coverage"]) / 2),
                 textcoords="offset points", xytext=(-260, 0),
                 fontsize=11, color="#6d28d9", fontweight="bold")

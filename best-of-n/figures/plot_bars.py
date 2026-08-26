@@ -65,12 +65,14 @@ gain = d["top"] - d["base"]
 selection = d["top"] - d["rnd_top"]
 fig.text(0.034, 0.108,
          "Of the +%.1f points over a single sample, +%.1f come from selection "
-         "itself. Exact McNemar vs random: p \u2264 %.0e at every one of %d "
+         "itself. Exact McNemar vs random: p \u2264 %.1e at every one of %d "
          "random seeds." % (gain, selection, d["p"], d["p_seeds"]),
          color=M.NOTA, fontsize=11.5, family=fam)
 fig.text(0.034, 0.075,
-         "Coverage is what the model reaches somewhere in its %d attempts "
-         "— the headroom a verifier can still claim." % n,
+         "Coverage is what the model reaches somewhere in its %d attempts. It "
+         "is a diagnostic ceiling, not a target: the problems holding it up "
+         "are single correct answers among %d, which no selector can pick out "
+         "without already knowing the answer." % (n, n),
          color=M.NOTA, fontsize=11.5, family=fam)
 
 M.footer(fig, None, "every number recomputable: scripts/analyse.py")

@@ -116,23 +116,25 @@ on.
 It is *close to*, but not the same as, what `random` scores at large N. Random
 picks among the trajectories that produced an answer, so it skips the
 abstentions and comes out slightly higher: on our published run p is 45.3% and
-`random` at N=128 is 46.4%. That 1.1-point wedge is the "not the method" term
-in the decomposition below, and conflating the two is what makes it disappear
-from a report.
+`random` at N=128 is 46.3%. That roughly one-point wedge is the "not the
+method" term in the decomposition the [README](README.md#how-much-of-the-gain-is-really-selection)
+reports, and conflating the two is what makes it disappear from a write-up.
 
 ```python
-from bestofn import normalise
+from bestofn.extract import equivalent
 
 results = engine.solve_batch(problems, n=16)
-p = sum(normalise(s.answer) == normalise(g)
+p = sum(bool(s.answer) and equivalent(s.answer, g)
         for r, g in zip(results, golds) for s in r.samples) \
     / sum(r.n for r in results)
 ```
 
-Note the `normalise` on both sides. Comparing `s.answer == g` directly reads
-0.44 on our own published data where the library reads 0.45, because a
-trajectory that wrote `1,000` or `204.0` is scored wrong against a gold of
-`1000` or `204`.
+Use `equivalent`, not `==`, and not `normalise(a) == normalise(b)` either.
+On our own published data the three give 0.4534, 0.4425 and 0.4527: plain `==`
+scores a trajectory wrong for writing `1,000` where the gold says `1000`, and
+comparing canonical keys still misses `0.5` against `1/2`. `equivalent` is what
+`Result.is_correct` and `coverage` both use, so it is the one that makes your
+number comparable to the ones in the README.
 
 **There is little point in `n=2`.** With two trajectories there is no majority
 to speak of, so it costs twice as much as one sample and gains
