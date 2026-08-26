@@ -50,12 +50,27 @@ def load():
     return d
 
 
+SUP = "⁰¹²³⁴⁵⁶⁷⁸⁹"
+
+
 def sci(x):
-    """1.401e-05 -> '1.4 x 10^-5', for prose rather than code."""
-    m, e = ("%.1e" % x).split("e")
-    return "%s × 10⁻%s" % (m, "".join(
-        "⁰¹²³⁴⁵⁶⁷⁸⁹"[int(ch)]
-        for ch in str(abs(int(e)))))
+    """1.401e-05 -> '1.5 × 10⁻⁵', for prose rather than code.
+
+    Rounds the mantissa **up**, because every caller prints this after "p ≤"
+    and rounding to nearest makes the inequality false half the time. The sign
+    of the exponent is read from the number rather than assumed negative.
+    """
+    import math
+    if x <= 0 or not math.isfinite(x):
+        return "%g" % x
+    e = math.floor(math.log10(x)) - 1
+    m = math.ceil(x / 10 ** e) / 10.0          # two sig figs, rounded up
+    if m >= 10:                                # 9.96 -> 10.0 -> 1.0e+1
+        m, e = m / 10.0, e + 1
+    exp = e + 1
+    sign = "⁻" if exp < 0 else ""
+    return "%.1f × 10%s%s" % (m, sign, "".join(SUP[int(c)]
+                                               for c in str(abs(exp))))
 
 
 def blocks(d):
@@ -137,6 +152,37 @@ def blocks(d):
         "the gain — is genuine selection**, not an artefact of comparing a "
         "one-sample baseline against an N-sample system."
         % (d["from_sel"], d["gain"], d["share"]))
+
+    # ------------------------------------------------ the multi-model table
+    models = os.path.join(HERE, "results", "models", "summary.json")
+    if os.path.exists(models):
+        rows = json.load(io.open(models, encoding="utf-8"))
+        rows.sort(key=lambda r: r["single"])
+        out["models"] = (
+            "| model | one sample | **Best-of-N** | gain | coverage |\n"
+            "|---|---:|---:|---:|---:|\n" + "\n".join(
+                "| `%s`<br><sub>%s · N=%d</sub> | %.1f%% | **%.1f%%** | "
+                "**+%.1f** | %.1f%% |"
+                % (r["model"], r["label"], r["n"], r["single"],
+                   r["majority"], r["gain"], r["coverage"])
+                for r in rows))
+        gains = [r["gain"] for r in rows]
+        heads = [r["headroom"] for r in rows]
+        improved = sum(1 for g in gains if g > 0)
+        out["models_prose"] = (
+            "%s of the %d models we measured improved, by between **+%.1f** "
+            "and **+%.1f** points, and none of them was trained. The gain "
+            "shrinks as the base model gets better — which is what should "
+            "happen, and is worth saying plainly rather than hiding behind "
+            "the largest number in the table.\n\n"
+            "The row that matters more is coverage. It stays above what the "
+            "vote returns on **every** model, by a median of %.1f points: "
+            "even the strongest one here is still failing to return answers "
+            "it already found. That gap is the whole reason to work on "
+            "selection rather than on sampling harder."
+            % ("Every one" if improved == len(rows) else "%d" % improved,
+               len(rows), min(gains), max(gains),
+               sorted(heads)[len(heads) // 2]))
 
     return out
 

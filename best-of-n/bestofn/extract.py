@@ -123,6 +123,23 @@ _NOISE_WORDS_RE = re.compile(
 # a real space beside it when this runs.
 # One or more sentinels: "{1}{2}" leaves two adjacent (the closing brace
 # and the opening one), and a run of deletions can leave several.
+#: ``1 000`` and ``1 000 000`` are single numbers written with space
+#: grouping: one to three digits, then groups of exactly three. Anything else
+#: separated by a gap is two numbers.
+_SPACE_THOUSANDS = re.compile(r"^-?\d{1,3}(?:GAP\d{3})+$".replace("GAP", _GAP))
+
+
+def _fuses_digits(s: str) -> bool:
+    """Whether removing the gaps in ``s`` would invent a number.
+
+    True when two digits are only separated by something deleted, and the
+    result is not a legitimate space-grouped thousands figure.
+    """
+    if not _GAP_FUSES_DIGITS.search(s):
+        return False
+    return not _SPACE_THOUSANDS.match(s.strip())
+
+
 _GAP_FUSES_DIGITS = re.compile(r"[0-9](?:\s*" + _GAP + r")+\s*[0-9]")
 
 #: 1,000 or 1{,}000 -> 1000, but only when the commas really do group digits.
@@ -222,8 +239,20 @@ def _latex_to_text(s: str) -> Optional[str]:
 
     # Units are deleted, and the deletion leaves a gap: "5\\text{ feet }
     # 6\\text{ inches}" is two measurements, not the number 56.
-    s = _TEXTUAL.sub(
-        lambda m: _GAP if _is_unit(m.group(1)) else (m.group(1) or ""), s)
+    def _textual(m):
+        r"""Keep the content unless it is a trailing unit.
+
+        A group immediately followed by an opening parenthesis is a function
+        name, not a unit: deleting it turned "\operatorname{gcd}(12,8)" --
+        which is 4 -- into the vote "(12,8)", an ordered pair. Not a lost
+        answer, a different one.
+        """
+        after = s[m.end():m.end() + 1]
+        if after == "(" or not _is_unit(m.group(1)):
+            return m.group(1) or ""
+        return _GAP
+
+    s = _TEXTUAL.sub(_textual, s)
 
     # A mixed number has to be resolved before the general \frac rule sees it.
     # "2\frac{1}{2}" is two and a half, but juxtaposition means multiplication
@@ -313,12 +342,17 @@ def _latex_to_text(s: str) -> Optional[str]:
     # and joining them manufactures the answer 12.
     s = s.replace("\\", "").replace("{", _GAP).replace("}", _GAP)
     s = s.replace(_LB, "{").replace(_RB, "}")
+
+    # Whitespace between two digits is a deletion like any other, and it is
+    # the one that was missed: "16 4" collapsed to the vote "164". Everything
+    # else can go straight out.
+    s = re.sub(r"(?<=[0-9])\s+(?=[0-9])", _GAP, s)
     s = re.sub(r"\s+", "", s)
 
     # The fusion check runs *after* every deletion, not in the middle of them.
     # Run mid-way -- which is where it used to sit -- it could only see the
     # deletions that had already happened.
-    if _GAP_FUSES_DIGITS.search(s):
+    if _fuses_digits(s):
         return None
     s = s.replace(_GAP, "")
 
@@ -397,6 +431,23 @@ def _tidy_parens(s: str) -> str:
 
 # ----------------------------------------------------------------- extractors
 
+def _as_text(value) -> str:
+    """Coerce anything to text for extraction, without ever raising.
+
+    ``str()`` is not safe on arbitrary input: a ``__str__`` can raise, and
+    CPython refuses to render an int of more than 4300 digits. Both are things
+    a trajectory can carry.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    try:
+        return str(value)
+    except Exception:                       # noqa: BLE001 -- deliberate
+        return ""
+
+
 def extract_boxed(text: str, allow_fallback: bool = False) -> str:
     """Content of the LAST ``\\boxed{...}``, handling nested braces.
 
@@ -413,6 +464,7 @@ def extract_boxed(text: str, allow_fallback: bool = False) -> str:
     Returns:
         The canonicalised answer, or ``""`` to abstain.
     """
+    text = _as_text(text)
     if not text:
         return ""
     idx = text.rfind("\\boxed{")
@@ -449,6 +501,7 @@ def extract_number(text: str) -> str:
     Digit-grouping commas are stripped (``1,000`` -> ``1000``); other commas
     terminate the match, so ``(3,4)`` yields ``4`` rather than ``34``.
     """
+    text = _as_text(text)
     if not text:
         return ""
     nums = re.findall(r"-?\d{1,3}(?:,\d{3})+(?:\.\d+)?|-?\d+(?:\.\d+)?", text)
@@ -504,6 +557,7 @@ def extract_letter(text: str, options: str = "ABCD",
     model had mentioned while ruling it *out*. That now requires
     ``allow_fallback=True``, matching :func:`extract_boxed`.
     """
+    text = _as_text(text)
     if not text:
         return ""
 

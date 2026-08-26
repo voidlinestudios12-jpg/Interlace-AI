@@ -302,6 +302,41 @@ the random row, because a gain is only a gain relative to something.
 
 ---
 
+---
+
+## Does it hold on other models?
+
+That is the first question anyone asks after a single 0.5B result, so we ran
+the same protocol across a size range — same 200 GSM8K problems, same prompt,
+same temperature, same token budget, same N, weights frozen throughout. A
+comparison where the protocol drifts between rows is not a comparison.
+
+![Best-of-N across model scale](https://huggingface.co/InterlaceAI/best-of-n/resolve/main/figures/13_models.png)
+
+<!-- auto:models -->
+| model | one sample | **Best-of-N** | gain | coverage |
+|---|---:|---:|---:|---:|
+| `HuggingFaceTB/SmolLM2-1.7B-Instruct`<br><sub>1.7B, different family · N=64</sub> | 21.7% | **59.0%** | **+37.3** | 86.5% |
+| `Qwen/Qwen2.5-0.5B-Instruct`<br><sub>0.5B general · N=64</sub> | 45.5% | **65.5%** | **+20.0** | 92.5% |
+| `Qwen/Qwen2.5-1.5B-Instruct`<br><sub>1.5B general · N=64</sub> | 68.8% | **80.0%** | **+11.2** | 97.0% |
+| `microsoft/Phi-3-mini-4k-instruct`<br><sub>3.8B, different family · N=64</sub> | 80.9% | **91.0%** | **+10.1** | 100.0% |
+| `Qwen/Qwen2.5-3B-Instruct`<br><sub>3B general · N=64</sub> | 83.0% | **91.0%** | **+8.0** | 98.5% |
+| `Qwen/Qwen2.5-Math-1.5B-Instruct`<br><sub>1.5B maths-tuned · N=64</sub> | 84.3% | **89.5%** | **+5.2** | 95.0% |
+| `Qwen/Qwen2.5-7B-Instruct`<br><sub>7B general · N=64</sub> | 90.1% | **94.0%** | **+3.9** | 98.5% |
+<!-- /auto:models -->
+
+<!-- auto:models_prose -->
+Every one of the 7 models we measured improved, by between **+3.9** and **+37.3** points, and none of them was trained. The gain shrinks as the base model gets better — which is what should happen, and is worth saying plainly rather than hiding behind the largest number in the table.
+
+The row that matters more is coverage. It stays above what the vote returns on **every** model, by a median of 9.0 points: even the strongest one here is still failing to return answers it already found. That gap is the whole reason to work on selection rather than on sampling harder.
+<!-- /auto:models_prose -->
+
+Every row is re-derived from that model's own published trajectories, with each
+answer re-extracted from the raw reasoning text rather than read back from
+storage — so a change to the extractor moves these numbers, and we would see
+it. Run `python scripts/run_models.py --rescore results/models` and they come
+out again on a CPU in under a minute.
+
 ## Bring your own reward model
 
 Best-of-N works with **any published reward model**, and it makes them work

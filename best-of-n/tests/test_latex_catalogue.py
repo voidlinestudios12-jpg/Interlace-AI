@@ -102,6 +102,23 @@ for gap in ("\\quad", "\\qquad", "\\;", "\\,", "\\!", "\\:", "\\ ",
     check("7 %s 3 does not become 73" % gap,
           extract_boxed("\\boxed{7%s 3}" % gap) in ("", None), True)
 
+# Whitespace is a deletion like any other, and it was the one nobody
+# looked at, because it deletes nothing visible. "16 4" collapsed to the
+# vote "164" -- two numbers presented as one that was never written.
+print("\n  whitespace between digits does not fuse them")
+for _inner in ("5 6", "16 4", "2  30", "45 30", "5 6 7"):
+    check("%r is two numbers, not one" % _inner,
+          extract_boxed("\\boxed{%s}" % _inner) in ("", None), True)
+
+# ...but space-grouped thousands is one number in most of Europe, and the
+# rule has to keep it. A guard that abstains on everything would pass the
+# block above and be worthless.
+print("\n  space-grouped thousands still parses")
+for _inner, _want in (("1 000", "1000"), ("1 000 000", "1000000"),
+                      ("12 345", "12345"), ("-1 500", "-1500")):
+    check("%r is one number" % _inner,
+          extract_boxed("\\boxed{%s}" % _inner), _want)
+
 # And the legitimate forms must all survive. A guard that abstains on
 # everything would pass the block above and be useless.
 print("\n  legitimate answers still vote")
