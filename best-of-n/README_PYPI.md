@@ -311,11 +311,12 @@ comparison where the protocol drifts between rows is not a comparison.
 | `microsoft/Phi-3-mini-4k-instruct`<br><sub>3.8B, different family · N=64</sub> | 80.9% | **91.0%** | **+10.1** | 100.0% |
 | `Qwen/Qwen2.5-3B-Instruct`<br><sub>3B general · N=64</sub> | 83.0% | **91.0%** | **+8.0** | 98.5% |
 | `Qwen/Qwen2.5-Math-1.5B-Instruct`<br><sub>1.5B maths-tuned · N=64</sub> | 84.3% | **89.5%** | **+5.2** | 95.0% |
+| `Qwen/Qwen3.8-27B`<br><sub>27B vision-language, text-only · N=64</sub> | 88.5% | **95.5%** | **+7.0** | 96.5% |
 | `Qwen/Qwen2.5-7B-Instruct`<br><sub>7B general · N=64</sub> | 90.1% | **94.0%** | **+3.9** | 98.5% |
 <!-- /auto:models -->
 
 <!-- auto:models_prose -->
-Every one of the 7 models we measured improved, by between **+3.9** and **+37.3** points, and none of them was trained. The gain shrinks as the base model gets better — which is what should happen, and is worth saying plainly rather than hiding behind the largest number in the table.
+Every one of the 8 models we measured improved, by between **+3.9** and **+37.3** points, and none of them was trained. The gain shrinks as the base model gets better — which is what should happen, and is worth saying plainly rather than hiding behind the largest number in the table.
 
 The row that matters more is coverage. It stays above what the vote returns on **every** model, by a median of 9.0 points: even the strongest one here is still failing to return answers it already found. That gap is the whole reason to work on selection rather than on sampling harder.
 <!-- /auto:models_prose -->
@@ -400,6 +401,62 @@ Best-of-N pays off most on:
 
 Practical guidance on choosing N, plugging in a verifier and measuring your own
 task is in [USAGE.md](https://github.com/voidlinestudios12-jpg/Interlace-AI/blob/main/best-of-n/USAGE.md).
+
+---
+
+## How this compares
+
+Checked against the current published wheels in August 2026, not against
+reputation. Every cell below names the file it came from, so you can verify it
+yourself rather than take our word for it.
+
+| | `lm-eval` 0.4.12 | `dspy` 3.3.1 | `bestofn` |
+|---|---|---|---|
+| Majority vote | 2 task configs, GSM8K only | `majority()` | yes |
+| Answer comparison | one regex | lowercase + strip punctuation | symbolic (`math-verify`) |
+| Coverage in the same table | no | no | **yes** |
+| Random baseline | no | no | **yes** |
+| Abstention accounted for | no | `None` is skipped | **yes, published** |
+| Same answer whatever the order | no | no | **yes** |
+| Replay re-extracts from raw text | writes samples, re-counts them | no | **yes** |
+
+**Where the numbers came from.** `lm-eval`'s self-consistency is
+`lm_eval/tasks/gsm8k/gsm8k-cot-self-consistency.yaml` and its
+`gsm8k_platinum` twin — two files, offering `score-first`, `maj@8` and
+`maj@64`. Its own comment on the `maj@8` filter reads *"Using a better
+estimator would be optimal"*: it takes the first 8 of the 64 rather than
+resampling, which is biased. Extraction is the single pattern
+`The answer is (\-?[0-9\.\,]*[0-9]+)`, so a correct answer written any other
+way scores as wrong, and `pass@k` lives in an unrelated task
+(`lm_eval/tasks/cruxeval/utils.py`) rather than beside `maj@n`.
+
+`dspy.BestOfN` (`dspy/predict/best_of_n.py`) is a different thing that shares
+the name: it takes a `reward_fn`, returns the single highest-scoring
+completion, and stops early at a threshold. It does not vote.
+`dspy.majority` (`dspy/predict/aggregation.py`) does, normalising with
+`normalize_text` — lowercase and strip punctuation — and breaking ties towards
+the earlier completion, so the answer depends on the order the samples arrive
+in.
+
+`trl` 1.12.0 has no `BestOfNSampler`. It was removed; there are zero matches
+for it in the current wheel.
+
+**What we are not claiming.** The idea is not ours. Sampling a model many times
+and taking the mode is self-consistency (Wang et al., 2022); measuring what the
+pool reached against what the selector returned is the subject of Brown et
+al.'s *Large Language Monkeys* (2024) and of Snell et al. (2024). Those papers
+did this before us and at greater scale. What was missing was a library that
+does it in one call and reports the parts honestly by default — and a published
+dataset you can re-derive every figure from without a GPU.
+
+**Where we lose.** `lm-eval` covers hundreds of tasks; we measure one benchmark
+across eight models. We ship no reward model and no process reward model, so
+the 27-point gap between what our models reach and what they return is a gap we
+name rather than close. There is no beam search, no lookahead, no
+compute-optimal allocation — the selectors here are majority voting and a
+confidence weighting, and on our data the confidence weighting does not beat
+the free one. If you need throughput, vLLM and SGLang generate the trajectories
+and this only chooses among them.
 
 ---
 
