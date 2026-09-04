@@ -81,6 +81,10 @@ def main():
     ap.add_argument("--temperature", type=float, default=0.7)
     ap.add_argument("--top-p", type=float, default=0.95)
     ap.add_argument("--batch", type=int, default=25)
+    ap.add_argument("--max-seqs", type=int, default=160,
+                    help="concurrent sequences; lower it for hybrid Mamba "
+                         "models on small cards, which need one cache block "
+                         "each")
     ap.add_argument("--out-dir", default="results/models")
     ap.add_argument("--only", default=None,
                     help="substring; run just the models matching it")
@@ -117,7 +121,18 @@ def main():
                                  # run against a 2048 window truncated 4.4% of
                                  # trajectories and paid for generation it could
                                  # never produce.
-                                 max_model_len=args.max_tokens + 2048)
+                                 max_model_len=args.max_tokens + 2048,
+                                 # Qwen3.8-27B is a hybrid Mamba/attention
+                                 # model: every concurrent sequence needs its
+                                 # own Mamba cache block, and a 48 GB card
+                                 # holding 31 GB of FP8 weights has room for
+                                 # 219 of them. vLLM's default of 256 fails
+                                 # outright with "max_num_seqs exceeds
+                                 # available Mamba cache blocks" -- which is
+                                 # why the same model loaded on an 80 GB card
+                                 # and not here. This caps concurrency, not
+                                 # correctness: the remaining sequences queue.
+                                 max_num_seqs=args.max_seqs)
             except BaseException as exc:                        # noqa: BLE001
                 # BaseException, not Exception: a gated repo surfaced as an
                 # OSError that escaped and killed the sweep on its second row,
