@@ -50,7 +50,12 @@ MODELS = [
     # rows above and the label has to say so -- calling it "27B
     # frontier-class" beside six text models would imply a comparison the
     # architecture does not support.
-    ("Qwen/Qwen3.8-27B",                   "27B vision-language, text-only", 64),
+    # FP8, not bf16, and the label says so. Qwen publishes both; FP8 is 30.9 GB
+    # of weights against 55.6, which fits a 48 GB card instead of needing an
+    # 80 GB one at three times the price. Substituting a quantised build and
+    # labelling it as the base model would be exactly the sort of quiet swap
+    # this library was written to detect.
+    ("Qwen/Qwen3.8-27B-FP8",  "27B vision-language, text-only, FP8", 64),
 ]
 
 #: meta-llama/Llama-3.2-1B-Instruct was here and is gated: it returns 403
