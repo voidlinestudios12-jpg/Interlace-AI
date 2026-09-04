@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bestofn"
-version = "1.1.6"
+version = "1.1.7"
 description = "Inference-time compute for language models: sample N reasoning trajectories and select the best."
 readme = "README_PYPI.md"
 requires-python = ">=3.8"

@@ -133,22 +133,22 @@
     "tokens": 3922277
   },
   {
-    "model": "Qwen/Qwen3.8-27B",
-    "label": "27B vision-language, text-only",
+    "model": "Qwen/Qwen3.8-27B-FP8",
+    "label": "27B vision-language, text-only, FP8",
     "n": 64,
     "problems": 200,
     "trajectories": 12800,
-    "single": 88.47,
-    "random": 95.31,
-    "majority": 95.5,
-    "coverage": 96.5,
-    "gain": 7.03,
-    "selection_gain": 0.19,
-    "abstention_gain": 6.84,
+    "single": 95.14,
+    "random": 96.4,
+    "majority": 97.5,
+    "coverage": 98.5,
+    "gain": 2.36,
+    "selection_gain": 1.1,
+    "abstention_gain": 1.26,
     "headroom": 1.0,
     "reextraction_drift": 0,
-    "voting_rate": 90.05,
-    "truncation_rate": 11.15,
-    "tokens": 5252108
+    "voting_rate": 97.88,
+    "truncation_rate": 3.72,
+    "tokens": 7714701
   }
 ]

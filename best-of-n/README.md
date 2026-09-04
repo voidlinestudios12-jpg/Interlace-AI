@@ -324,12 +324,12 @@ comparison where the protocol drifts between rows is not a comparison.
 | `microsoft/Phi-3-mini-4k-instruct`<br><sub>3.8B, different family · N=64</sub> | 80.9% | **91.0%** | **+10.1** | 100.0% |
 | `Qwen/Qwen2.5-3B-Instruct`<br><sub>3B general · N=64</sub> | 83.0% | **91.0%** | **+8.0** | 98.5% |
 | `Qwen/Qwen2.5-Math-1.5B-Instruct`<br><sub>1.5B maths-tuned · N=64</sub> | 84.3% | **89.5%** | **+5.2** | 95.0% |
-| `Qwen/Qwen3.8-27B`<br><sub>27B vision-language, text-only · N=64</sub> | 88.5% | **95.5%** | **+7.0** | 96.5% |
 | `Qwen/Qwen2.5-7B-Instruct`<br><sub>7B general · N=64</sub> | 90.1% | **94.0%** | **+3.9** | 98.5% |
+| `Qwen/Qwen3.8-27B-FP8`<br><sub>27B vision-language, text-only, FP8 · N=64</sub> | 95.1% | **97.5%** | **+2.4** | 98.5% |
 <!-- /auto:models -->
 
 <!-- auto:models_prose -->
-Every one of the 8 models we measured improved, by between **+3.9** and **+37.3** points, and none of them was trained. The gain shrinks as the base model gets better — which is what should happen, and is worth saying plainly rather than hiding behind the largest number in the table.
+Every one of the 8 models we measured improved, by between **+2.4** and **+37.3** points, and none of them was trained. The gain shrinks as the base model gets better — which is what should happen, and is worth saying plainly rather than hiding behind the largest number in the table.
 
 The row that matters more is coverage. It stays above what the vote returns on **every** model, by a median of 9.0 points: even the strongest one here is still failing to return answers it already found. That gap is the whole reason to work on selection rather than on sampling harder.
 <!-- /auto:models_prose -->
