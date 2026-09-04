@@ -8,9 +8,11 @@
 
 **INTERLACE&nbsp;AI**
 
-# Best-of-N
+# Best-of-N&nbsp;1.1
 
 ### Your model already knows more than it tells you
+
+*The 1.0 line is withdrawn. See [why](#what-happened-to-10).*
 
 [![PyPI](https://img.shields.io/pypi/v/bestofn?color=blue)](https://pypi.org/project/bestofn/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21936832.svg)](https://doi.org/10.5281/zenodo.21936832)
@@ -475,6 +477,39 @@ What this adds: the **selection layer the serving stacks deliberately leave
 out** — vLLM removed `best_of` in 2025, SGLang discourages `n>1`, LMDeploy
 supports only 1 — a single small API over six interchangeable selectors, and
 the raw trajectories behind every number we publish.
+
+---
+
+## What happened to 1.0
+
+**Version 1.0 is withdrawn. Its numbers should not be cited, including by us.**
+
+It reported 83.3% coverage on AIME 2024 and credited a trained outcome reward
+model with a 16.6-point gain over majority voting. An adversarial audit of the
+published package found defects in answer extraction and in the handling of
+truncated trajectories that corrupted the inputs to the vote:
+
+- Fractions and radicals collapsed onto their first digit, so one half, one
+  third and minus one half all compared equal.
+- Commas were deleted unconditionally, so the ordered pair `(3,4)` became the
+  integer `34` — a fabricated answer, not a lost one.
+- A trajectory cut off mid-reasoning contributed "the last number in its text"
+  as a vote, indistinguishable from a real one.
+
+Those measurements are not reproducible with the corrected implementation.
+Separately, the reward model was never published, the problem set it was
+measured on was never published, and in the one evidence file that was, it
+selected the same answer as majority voting on all 30 problems — a net gain of
+zero.
+
+**1.1 ships no reward model.** It provides adapters for third-party ones, with
+the range validation that stops a reward model's unbounded logits from silently
+degrading a weighted vote into an unweighted one.
+
+Everything in this card is GSM8K, measured with the version in the badge above,
+and reproducible from the trajectories published alongside it. The full account
+is in [the technical note](https://github.com/voidlinestudios12-jpg/Interlace-AI/blob/main/best-of-n/TR-2026-02.md) and the
+[changelog](https://github.com/voidlinestudios12-jpg/Interlace-AI/blob/main/best-of-n/CHANGELOG.md).
 
 ---
 

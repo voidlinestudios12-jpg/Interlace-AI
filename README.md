@@ -30,7 +30,11 @@ rather than believed.
 
 ---
 
-## Best-of-N
+## Best-of-N 1.1
+
+> **The 1.0 line is withdrawn.** Its AIME and trained-verifier numbers came from a
+> version with defects in answer extraction and are not reproducible. The full
+> account is in [best-of-n/README.md](best-of-n/README.md#what-happened-to-10).
 
 Our first release, and the idea behind it is simple enough to state in a
 sentence:

@@ -1,4 +1,4 @@
-# Using Best-of-N
+# Using Best-of-N 1.1
 
 A practical guide: how to install it, how to read what it tells you, how to
 plug in a reward model, and how to measure the gain on your own task so the

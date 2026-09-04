@@ -58,6 +58,17 @@ def ceil_sig(x, digits=2):
     return math.ceil(x / 10 ** e) * 10 ** e
 
 
+def _version() -> str:
+    """The library version, read from the package rather than typed here."""
+    try:
+        import sys
+        sys.path.insert(0, ROOT)
+        from bestofn import __version__
+        return __version__
+    except Exception:                                   # noqa: BLE001
+        return ""
+
+
 def font():
     """The first font in the list that is actually installed."""
     for c in ("Segoe UI", "Inter", "Arial"):
@@ -114,6 +125,13 @@ def header(fig, title, subtitle, height=0.20):
              fontweight="bold", family=fam, va="center")
     cab.text(1.12, 1.10, "A I", color=AZUL, fontsize=8, fontweight="bold",
              family=fam, va="center")
+
+    # The version, top right. These charts end up on social media detached
+    # from any page that could say which release produced them, and the 1.0
+    # line is withdrawn -- an undated chart of ours is a liability.
+    cab.text(15.45, 1.30, "BEST-OF-N  %s" % _version(), color=NOTA,
+             fontsize=9.5, fontweight="bold", family=fam, va="center",
+             ha="right")
 
     cab.text(0.55, 0.58, title, color=BLANCO, fontsize=28,
              fontweight="bold", family=fam, va="center")
