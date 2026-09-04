@@ -105,7 +105,14 @@ def main():
                                  extractor="boxed", prompt_suffix=SUFFIX,
                                  backend="vllm", logprobs=True,
                                  gpu_memory_utilization=0.90,
-                                 max_model_len=2048)
+                                 # Prompt AND generation share this budget, so
+                                 # it has to exceed max_tokens or the engine
+                                 # truncates at max_model_len and the token
+                                 # budget you asked for is fiction. A 3072-token
+                                 # run against a 2048 window truncated 4.4% of
+                                 # trajectories and paid for generation it could
+                                 # never produce.
+                                 max_model_len=args.max_tokens + 2048)
             except BaseException as exc:                        # noqa: BLE001
                 # BaseException, not Exception: a gated repo surfaced as an
                 # OSError that escaped and killed the sweep on its second row,
