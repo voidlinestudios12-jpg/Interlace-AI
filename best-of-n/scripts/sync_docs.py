@@ -153,6 +153,19 @@ def blocks(d):
         "one-sample baseline against an N-sample system."
         % (d["from_sel"], d["gain"], d["share"]))
 
+    # ------------------------------------------------------------- title
+    # Generated, because "Best-of-N 1.1" was typed by hand and was still
+    # saying 1.1 three releases later. Anything a human types here will
+    # eventually be wrong; anything read from the package cannot be.
+    # Read from the source file, not from ``import bestofn``. The import
+    # resolves to whatever is installed in the environment -- here a stale
+    # 1.1.1 from pip -- and stamped that into the published title. The file
+    # sitting beside this script cannot be the wrong one.
+    _init = io.open(os.path.join(HERE, "bestofn", "__init__.py"),
+                    encoding="utf-8").read()
+    _m = re.search(r"__version__\s*=\s*[\"']([^\"']+)", _init)
+    out["title"] = "# Best-of-N&nbsp;%s" % (_m.group(1) if _m else "")
+
     # ------------------------------------------------ the multi-model table
     models = os.path.join(HERE, "results", "models", "summary.json")
     if os.path.exists(models):

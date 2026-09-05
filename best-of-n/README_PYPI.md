@@ -8,7 +8,9 @@
 
 **INTERLACE&nbsp;AI**
 
-# Best-of-N&nbsp;1.1
+<!-- auto:title -->
+# Best-of-N&nbsp;1.1.7
+<!-- /auto:title -->
 
 ### Your model already knows more than it tells you
 
@@ -442,14 +444,6 @@ in.
 
 `trl` 1.12.0 has no `BestOfNSampler`. It was removed; there are zero matches
 for it in the current wheel.
-
-**What we are not claiming.** The idea is not ours. Sampling a model many times
-and taking the mode is self-consistency (Wang et al., 2022); measuring what the
-pool reached against what the selector returned is the subject of Brown et
-al.'s *Large Language Monkeys* (2024) and of Snell et al. (2024). Those papers
-did this before us and at greater scale. What was missing was a library that
-does it in one call and reports the parts honestly by default — and a published
-dataset you can re-derive every figure from without a GPU.
 
 **Where we lose.** `lm-eval` covers hundreds of tasks; we measure one benchmark
 across eight models. We ship no reward model and no process reward model, so

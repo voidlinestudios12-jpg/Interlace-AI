@@ -1,5 +1,5 @@
 ---
-title: Best-of-N 1.1
+title: Best-of-N 1.1.7
 emoji: 🎯
 colorFrom: blue
 colorTo: gray
@@ -10,7 +10,7 @@ license: apache-2.0
 short_description: 45.3% to 66.5% on GSM8K, frozen 0.5B, no training
 ---
 
-# Best-of-N 1.1
+# Best-of-N 1.1.7
 
 Inference-time compute for any language model. Sample N reasoning trajectories
 from a **frozen** model and select among them. No weights are modified.
